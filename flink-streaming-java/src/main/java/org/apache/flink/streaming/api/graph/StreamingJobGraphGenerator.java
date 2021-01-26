@@ -45,10 +45,11 @@ import org.apache.flink.runtime.jobgraph.tasks.CheckpointCoordinatorConfiguratio
 import org.apache.flink.runtime.jobgraph.tasks.JobCheckpointingSettings;
 import org.apache.flink.runtime.jobgraph.topology.DefaultLogicalPipelinedRegion;
 import org.apache.flink.runtime.jobgraph.topology.DefaultLogicalTopology;
-import org.apache.flink.runtime.jobmanager.scheduler.CoLocationGroup;
+import org.apache.flink.runtime.jobmanager.scheduler.CoLocationGroupImpl;
 import org.apache.flink.runtime.jobmanager.scheduler.SlotSharingGroup;
 import org.apache.flink.runtime.operators.coordination.OperatorCoordinator;
 import org.apache.flink.runtime.operators.util.TaskConfig;
+import org.apache.flink.runtime.state.CheckpointStorage;
 import org.apache.flink.runtime.state.StateBackend;
 import org.apache.flink.runtime.util.config.memory.ManagedMemoryUtils;
 import org.apache.flink.streaming.api.CheckpointingMode;
@@ -694,6 +695,7 @@ public class StreamingJobGraphGenerator {
         final CheckpointConfig checkpointCfg = streamGraph.getCheckpointConfig();
 
         config.setStateBackend(streamGraph.getStateBackend());
+        config.setCheckpointStorage(streamGraph.getCheckpointStorage());
         config.setGraphContainingLoops(streamGraph.isIterative());
         config.setTimerServiceProvider(streamGraph.getTimerServiceProvider());
         config.setCheckpointingEnabled(checkpointCfg.isCheckpointingEnabled());
@@ -1001,7 +1003,7 @@ public class StreamingJobGraphGenerator {
     }
 
     private void setCoLocation() {
-        final Map<String, Tuple2<SlotSharingGroup, CoLocationGroup>> coLocationGroups =
+        final Map<String, Tuple2<SlotSharingGroup, CoLocationGroupImpl>> coLocationGroups =
                 new HashMap<>();
 
         for (Entry<Integer, JobVertex> entry : jobVertices.entrySet()) {
@@ -1018,10 +1020,10 @@ public class StreamingJobGraphGenerator {
                             "Cannot use a co-location constraint without a slot sharing group");
                 }
 
-                Tuple2<SlotSharingGroup, CoLocationGroup> constraint =
+                Tuple2<SlotSharingGroup, CoLocationGroupImpl> constraint =
                         coLocationGroups.computeIfAbsent(
                                 coLocationGroupKey,
-                                k -> new Tuple2<>(sharingGroup, new CoLocationGroup()));
+                                k -> new Tuple2<>(sharingGroup, new CoLocationGroupImpl()));
 
                 if (constraint.f0 != sharingGroup) {
                     throw new IllegalStateException(
@@ -1283,6 +1285,20 @@ public class StreamingJobGraphGenerator {
             }
         }
 
+        // because the checkpoint storage can have user-defined code, it needs to be stored as
+        // eagerly serialized value
+        final SerializedValue<CheckpointStorage> serializedCheckpointStorage;
+        if (streamGraph.getCheckpointStorage() == null) {
+            serializedCheckpointStorage = null;
+        } else {
+            try {
+                serializedCheckpointStorage =
+                        new SerializedValue<>(streamGraph.getCheckpointStorage());
+            } catch (IOException e) {
+                throw new FlinkRuntimeException("Checkpoint storage is not serializable", e);
+            }
+        }
+
         //  --- done, put it all together ---
 
         JobCheckpointingSettings settings =
@@ -1305,6 +1321,7 @@ public class StreamingJobGraphGenerator {
                                 .setAlignmentTimeout(cfg.getAlignmentTimeout())
                                 .build(),
                         serializedStateBackend,
+                        serializedCheckpointStorage,
                         serializedHooks);
 
         jobGraph.setSnapshotSettings(settings);

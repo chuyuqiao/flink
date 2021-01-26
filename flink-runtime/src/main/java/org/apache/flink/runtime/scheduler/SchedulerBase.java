@@ -66,7 +66,6 @@ import org.apache.flink.runtime.jobgraph.JobVertexID;
 import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.runtime.jobgraph.SavepointRestoreSettings;
 import org.apache.flink.runtime.jobmanager.PartitionProducerDisposedException;
-import org.apache.flink.runtime.jobmanager.scheduler.CoLocationGroup;
 import org.apache.flink.runtime.jobmaster.ExecutionDeploymentTracker;
 import org.apache.flink.runtime.jobmaster.ExecutionDeploymentTrackerDeploymentListenerAdapter;
 import org.apache.flink.runtime.jobmaster.SerializedInputSplit;
@@ -86,8 +85,6 @@ import org.apache.flink.runtime.operators.coordination.TaskNotRunningException;
 import org.apache.flink.runtime.query.KvStateLocation;
 import org.apache.flink.runtime.query.KvStateLocationRegistry;
 import org.apache.flink.runtime.query.UnknownKvStateLocation;
-import org.apache.flink.runtime.rest.handler.legacy.backpressure.BackPressureStatsTracker;
-import org.apache.flink.runtime.rest.handler.legacy.backpressure.OperatorBackPressureStats;
 import org.apache.flink.runtime.scheduler.strategy.ExecutionVertexID;
 import org.apache.flink.runtime.scheduler.strategy.SchedulingExecutionVertex;
 import org.apache.flink.runtime.scheduler.strategy.SchedulingTopology;
@@ -102,6 +99,7 @@ import org.apache.flink.util.IOUtils;
 import org.apache.flink.util.InstantiationUtil;
 import org.apache.flink.util.IterableUtils;
 import org.apache.flink.util.function.FunctionUtils;
+import org.apache.flink.util.function.ThrowingConsumer;
 
 import org.slf4j.Logger;
 
@@ -141,8 +139,6 @@ public abstract class SchedulerBase implements SchedulerNG {
 
     protected final InputsLocationsRetriever inputsLocationsRetriever;
 
-    private final BackPressureStatsTracker backPressureStatsTracker;
-
     private final Executor ioExecutor;
 
     private final Configuration jobMasterConfiguration;
@@ -150,8 +146,6 @@ public abstract class SchedulerBase implements SchedulerNG {
     private final ScheduledExecutorService futureExecutor;
 
     private final ClassLoader userCodeLoader;
-
-    private final CheckpointRecoveryFactory checkpointRecoveryFactory;
 
     private final CompletedCheckpointStore completedCheckpointStore;
 
@@ -169,15 +163,11 @@ public abstract class SchedulerBase implements SchedulerNG {
 
     private final Map<OperatorID, OperatorCoordinatorHolder> coordinatorMap;
 
-    private ComponentMainThreadExecutor mainThreadExecutor =
-            new ComponentMainThreadExecutor.DummyComponentMainThreadExecutor(
-                    "SchedulerBase is not initialized with proper main thread executor. "
-                            + "Call to SchedulerBase.setMainThreadExecutor(...) required.");
+    private final ComponentMainThreadExecutor mainThreadExecutor;
 
     public SchedulerBase(
             final Logger log,
             final JobGraph jobGraph,
-            final BackPressureStatsTracker backPressureStatsTracker,
             final Executor ioExecutor,
             final Configuration jobMasterConfiguration,
             final ScheduledExecutorService futureExecutor,
@@ -190,22 +180,23 @@ public abstract class SchedulerBase implements SchedulerNG {
             final JobMasterPartitionTracker partitionTracker,
             final ExecutionVertexVersioner executionVertexVersioner,
             final ExecutionDeploymentTracker executionDeploymentTracker,
-            long initializationTimestamp)
+            long initializationTimestamp,
+            final ComponentMainThreadExecutor mainThreadExecutor,
+            final JobStatusListener jobStatusListener)
             throws Exception {
 
         this.log = checkNotNull(log);
         this.jobGraph = checkNotNull(jobGraph);
-        this.backPressureStatsTracker = checkNotNull(backPressureStatsTracker);
         this.ioExecutor = checkNotNull(ioExecutor);
         this.jobMasterConfiguration = checkNotNull(jobMasterConfiguration);
         this.futureExecutor = checkNotNull(futureExecutor);
         this.userCodeLoader = checkNotNull(userCodeLoader);
-        this.checkpointRecoveryFactory = checkNotNull(checkpointRecoveryFactory);
         this.rpcTimeout = checkNotNull(rpcTimeout);
 
         this.blobWriter = checkNotNull(blobWriter);
         this.jobManagerJobMetricGroup = checkNotNull(jobManagerJobMetricGroup);
         this.executionVertexVersioner = checkNotNull(executionVertexVersioner);
+        this.mainThreadExecutor = mainThreadExecutor;
 
         this.checkpointsCleaner = new CheckpointsCleaner();
         this.completedCheckpointStore =
@@ -213,11 +204,11 @@ public abstract class SchedulerBase implements SchedulerNG {
                         jobGraph,
                         jobMasterConfiguration,
                         userCodeLoader,
-                        checkpointRecoveryFactory,
+                        checkNotNull(checkpointRecoveryFactory),
                         log);
         this.checkpointIdCounter =
                 SchedulerUtils.createCheckpointIDCounterIfCheckpointingIsEnabled(
-                        jobGraph, checkpointRecoveryFactory);
+                        jobGraph, checkNotNull(checkpointRecoveryFactory));
 
         this.executionGraph =
                 createAndRestoreExecutionGraph(
@@ -228,7 +219,9 @@ public abstract class SchedulerBase implements SchedulerNG {
                         checkNotNull(shuffleMaster),
                         checkNotNull(partitionTracker),
                         checkNotNull(executionDeploymentTracker),
-                        initializationTimestamp);
+                        initializationTimestamp,
+                        mainThreadExecutor,
+                        jobStatusListener);
 
         registerShutDownCheckpointServicesOnExecutionGraphTermination(executionGraph);
 
@@ -240,7 +233,7 @@ public abstract class SchedulerBase implements SchedulerNG {
         inputsLocationsRetriever =
                 new ExecutionGraphToInputsLocationsRetrieverAdapter(executionGraph);
 
-        this.coordinatorMap = createCoordinatorMap();
+        this.coordinatorMap = createCoordinatorMap(this.mainThreadExecutor);
     }
 
     private void registerShutDownCheckpointServicesOnExecutionGraphTermination(
@@ -282,7 +275,9 @@ public abstract class SchedulerBase implements SchedulerNG {
             ShuffleMaster<?> shuffleMaster,
             JobMasterPartitionTracker partitionTracker,
             ExecutionDeploymentTracker executionDeploymentTracker,
-            long initializationTimestamp)
+            long initializationTimestamp,
+            ComponentMainThreadExecutor mainThreadExecutor,
+            JobStatusListener jobStatusListener)
             throws Exception {
 
         ExecutionGraph newExecutionGraph =
@@ -309,6 +304,11 @@ public abstract class SchedulerBase implements SchedulerNG {
                         newExecutionGraph, jobGraph.getSavepointRestoreSettings());
             }
         }
+
+        newExecutionGraph.setInternalTaskFailuresListener(
+                new UpdateSchedulerNgOnInternalFailuresListener(this, jobGraph.getJobID()));
+        newExecutionGraph.registerJobStatusListener(jobStatusListener);
+        newExecutionGraph.start(mainThreadExecutor);
 
         return newExecutionGraph;
     }
@@ -380,19 +380,9 @@ public abstract class SchedulerBase implements SchedulerNG {
     }
 
     protected void resetForNewExecutions(final Collection<ExecutionVertexID> vertices) {
-        final Set<CoLocationGroup> colGroups = new HashSet<>();
-        vertices.forEach(
-                executionVertexId -> {
-                    final ExecutionVertex ev = getExecutionVertex(executionVertexId);
-
-                    final CoLocationGroup cgroup = ev.getJobVertex().getCoLocationGroup();
-                    if (cgroup != null && !colGroups.contains(cgroup)) {
-                        cgroup.resetConstraints();
-                        colGroups.add(cgroup);
-                    }
-
-                    ev.resetForNewExecution();
-                });
+        vertices.stream()
+                .map(this::getExecutionVertex)
+                .forEach(ExecutionVertex::resetForNewExecution);
     }
 
     protected void restoreState(
@@ -613,20 +603,6 @@ public abstract class SchedulerBase implements SchedulerNG {
     // ------------------------------------------------------------------------
     // SchedulerNG
     // ------------------------------------------------------------------------
-
-    @Override
-    public void initialize(final ComponentMainThreadExecutor mainThreadExecutor) {
-        this.mainThreadExecutor = checkNotNull(mainThreadExecutor);
-        initializeOperatorCoordinators(mainThreadExecutor);
-        executionGraph.setInternalTaskFailuresListener(
-                new UpdateSchedulerNgOnInternalFailuresListener(this, jobGraph.getJobID()));
-        executionGraph.start(mainThreadExecutor);
-    }
-
-    @Override
-    public void registerJobStatusListener(final JobStatusListener jobStatusListener) {
-        executionGraph.registerJobStatusListener(jobStatusListener);
-    }
 
     @Override
     public final void startScheduling() {
@@ -931,17 +907,6 @@ public abstract class SchedulerBase implements SchedulerNG {
     }
 
     @Override
-    public Optional<OperatorBackPressureStats> requestOperatorBackPressureStats(
-            final JobVertexID jobVertexId) throws FlinkException {
-        final ExecutionJobVertex jobVertex = executionGraph.getJobVertex(jobVertexId);
-        if (jobVertex == null) {
-            throw new FlinkException("JobVertexID not found " + jobVertexId);
-        }
-
-        return backPressureStatsTracker.getOperatorBackPressureStats(jobVertex);
-    }
-
-    @Override
     public CompletableFuture<String> triggerSavepoint(
             final String targetDirectory, final boolean cancelJob) {
         mainThreadExecutor.assertRunningInMainThread();
@@ -1015,67 +980,56 @@ public abstract class SchedulerBase implements SchedulerNG {
             final long checkpointId,
             final CheckpointMetrics checkpointMetrics,
             final TaskStateSnapshot checkpointState) {
-        mainThreadExecutor.assertRunningInMainThread();
+        processCheckpointCoordinatorMessage(
+                "AcknowledgeCheckpoint",
+                coordinator ->
+                        coordinator.receiveAcknowledgeMessage(
+                                new AcknowledgeCheckpoint(
+                                        jobID,
+                                        executionAttemptID,
+                                        checkpointId,
+                                        checkpointMetrics,
+                                        checkpointState),
+                                retrieveTaskManagerLocation(executionAttemptID)));
+    }
 
-        final CheckpointCoordinator checkpointCoordinator =
-                executionGraph.getCheckpointCoordinator();
-        final AcknowledgeCheckpoint ackMessage =
-                new AcknowledgeCheckpoint(
-                        jobID,
-                        executionAttemptID,
-                        checkpointId,
-                        checkpointMetrics,
-                        checkpointState);
-
-        final String taskManagerLocationInfo = retrieveTaskManagerLocation(executionAttemptID);
-
-        if (checkpointCoordinator != null) {
-            ioExecutor.execute(
-                    () -> {
-                        try {
-                            checkpointCoordinator.receiveAcknowledgeMessage(
-                                    ackMessage, taskManagerLocationInfo);
-                        } catch (Throwable t) {
-                            log.warn(
-                                    "Error while processing checkpoint acknowledgement message", t);
-                        }
-                    });
-        } else {
-            String errorMessage =
-                    "Received AcknowledgeCheckpoint message for job {} with no CheckpointCoordinator";
-            if (executionGraph.getState() == JobStatus.RUNNING) {
-                log.error(errorMessage, jobGraph.getJobID());
-            } else {
-                log.debug(errorMessage, jobGraph.getJobID());
-            }
-        }
+    @Override
+    public void reportCheckpointMetrics(
+            JobID jobID, ExecutionAttemptID attemptId, long id, CheckpointMetrics metrics) {
+        processCheckpointCoordinatorMessage(
+                "ReportCheckpointStats",
+                coordinator -> coordinator.reportStats(id, attemptId, metrics));
     }
 
     @Override
     public void declineCheckpoint(final DeclineCheckpoint decline) {
+        processCheckpointCoordinatorMessage(
+                "DeclineCheckpoint",
+                coordinator ->
+                        coordinator.receiveDeclineMessage(
+                                decline,
+                                retrieveTaskManagerLocation(decline.getTaskExecutionId())));
+    }
+
+    private void processCheckpointCoordinatorMessage(
+            String messageType, ThrowingConsumer<CheckpointCoordinator, Exception> process) {
         mainThreadExecutor.assertRunningInMainThread();
 
         final CheckpointCoordinator checkpointCoordinator =
                 executionGraph.getCheckpointCoordinator();
-        final String taskManagerLocationInfo =
-                retrieveTaskManagerLocation(decline.getTaskExecutionId());
 
         if (checkpointCoordinator != null) {
             ioExecutor.execute(
                     () -> {
                         try {
-                            checkpointCoordinator.receiveDeclineMessage(
-                                    decline, taskManagerLocationInfo);
-                        } catch (Exception e) {
-                            log.error(
-                                    "Error in CheckpointCoordinator while processing {}",
-                                    decline,
-                                    e);
+                            process.accept(checkpointCoordinator);
+                        } catch (Exception t) {
+                            log.warn("Error while processing " + messageType + " message", t);
                         }
                     });
         } else {
             String errorMessage =
-                    "Received DeclineCheckpoint message for job {} with no CheckpointCoordinator";
+                    "Received " + messageType + " message for job {} with no CheckpointCoordinator";
             if (executionGraph.getState() == JobStatus.RUNNING) {
                 log.error(errorMessage, jobGraph.getJobID());
             } else {
@@ -1246,12 +1200,6 @@ public abstract class SchedulerBase implements SchedulerNG {
         }
     }
 
-    private void initializeOperatorCoordinators(ComponentMainThreadExecutor mainThreadExecutor) {
-        for (OperatorCoordinatorHolder coordinatorHolder : getAllCoordinators()) {
-            coordinatorHolder.lazyInitialize(this, mainThreadExecutor);
-        }
-    }
-
     private void startAllOperatorCoordinators() {
         final Collection<OperatorCoordinatorHolder> coordinators = getAllCoordinators();
         try {
@@ -1273,10 +1221,12 @@ public abstract class SchedulerBase implements SchedulerNG {
         return coordinatorMap.values();
     }
 
-    private Map<OperatorID, OperatorCoordinatorHolder> createCoordinatorMap() {
+    private Map<OperatorID, OperatorCoordinatorHolder> createCoordinatorMap(
+            ComponentMainThreadExecutor mainThreadExecutor) {
         Map<OperatorID, OperatorCoordinatorHolder> coordinatorMap = new HashMap<>();
         for (ExecutionJobVertex vertex : executionGraph.getAllVertices().values()) {
             for (OperatorCoordinatorHolder holder : vertex.getOperatorCoordinators()) {
+                holder.lazyInitialize(this, mainThreadExecutor);
                 coordinatorMap.put(holder.operatorId(), holder);
             }
         }

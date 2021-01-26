@@ -281,18 +281,25 @@ Format Options
       <td>Specify string literal to replace null key when <code>'canal-json.map-null-key.mode'</code> is LITERAL.</td>
     </tr>        
     <tr>
+      <td><h5>canal-json.encode.decimal-as-plain-number</h5></td>
+      <td>optional</td>
+      <td style="word-wrap: break-word;">false</td>
+      <td>Boolean</td>
+      <td>Encode all decimals as plain numbers instead of possible scientific notations. By default, decimals may be written using scientific notation. For example, <code>0.000000027</code> is encoded as <code>2.7E-8</code> by default, and will be written as <code>0.000000027</code> if set this option to true.</td>
+    </tr>
+    <tr>
       <td><h5>canal-json.database.include</h5></td>
       <td>optional</td>
       <td style="word-wrap: break-word;">(none)</td>
       <td>String</td>
-      <td>Only read changelog rows which match the specific database (by comparing the "database" meta field in the Canal record).</td>
+      <td>An optional regular expression to only read the specific databases changelog rows by regular matching the "database" meta field in the Canal record. The pattern string is compatible with Java's <a href="https://docs.oracle.com/javase/8/docs/api/java/util/regex/Pattern.html">Pattern</a>.</td>
     </tr>
     <tr>
       <td><h5>canal-json.table.include</h5></td>
       <td>optional</td>
       <td style="word-wrap: break-word;">(none)</td>
       <td>String</td>
-      <td>Only read changelog rows which match the specific table (by comparing the "table" meta field in the Canal record).</td>
+      <td>An optional regular expression to only read the specific tables changelog rows by regular matching the "table" meta field in the Canal record. The pattern string is compatible with Java's <a href="https://docs.oracle.com/javase/8/docs/api/java/util/regex/Pattern.html">Pattern</a>.</td>
     </tr>
     </tbody>
 </table>
