@@ -58,13 +58,15 @@ public class MongoJsonSerializationSchema implements SerializationSchema<RowData
             RowType rowType,
             TimestampFormat timestampFormat,
             JsonOptions.MapNullKeyMode mapNullKeyMode,
-            String mapNullKeyLiteral) {
+            String mapNullKeyLiteral,
+            boolean encodeDecimalAsPlainNumber) {
         jsonSerializer =
                 new JsonRowDataSerializationSchema(
                         createJsonRowType(fromLogicalToDataType(rowType)),
                         timestampFormat,
                         mapNullKeyMode,
-                        mapNullKeyLiteral);
+                        mapNullKeyLiteral,
+                        encodeDecimalAsPlainNumber);
     }
 
     @Override
@@ -76,7 +78,7 @@ public class MongoJsonSerializationSchema implements SerializationSchema<RowData
     public byte[] serialize(RowData row) {
         try {
             StringData opType = rowKind2String(row.getRowKind());
-            ArrayData arrayData = new GenericArrayData(new RowData[]{row});
+            ArrayData arrayData = new GenericArrayData(new RowData[] {row});
             reuse.setField(0, arrayData);
             reuse.setField(1, opType);
             return jsonSerializer.serialize(reuse);
@@ -122,8 +124,8 @@ public class MongoJsonSerializationSchema implements SerializationSchema<RowData
         // can not support UPDATE_BEFORE,UPDATE_AFTER
         return (RowType)
                 DataTypes.ROW(
-                        DataTypes.FIELD("o", DataTypes.ARRAY(databaseSchema)),
-                        DataTypes.FIELD("op", DataTypes.STRING()))
+                                DataTypes.FIELD("o", DataTypes.ARRAY(databaseSchema)),
+                                DataTypes.FIELD("op", DataTypes.STRING()))
                         .getLogicalType();
     }
 }

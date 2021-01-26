@@ -24,8 +24,6 @@ import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.formats.json.JsonOptions;
 import org.apache.flink.formats.json.TimestampFormat;
-import org.apache.flink.formats.json.canal.CanalJsonDecodingFormat;
-import org.apache.flink.formats.json.canal.CanalJsonSerializationSchema;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.format.DecodingFormat;
 import org.apache.flink.table.connector.format.EncodingFormat;
@@ -43,7 +41,14 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 
-import static org.apache.flink.formats.json.mongo.MongoJsonOptions.*;
+import static org.apache.flink.formats.json.JsonOptions.ENCODE_DECIMAL_AS_PLAIN_NUMBER;
+import static org.apache.flink.formats.json.mongo.MongoJsonOptions.IGNORE_PARSE_ERRORS;
+import static org.apache.flink.formats.json.mongo.MongoJsonOptions.JSON_MAP_NULL_KEY_LITERAL;
+import static org.apache.flink.formats.json.mongo.MongoJsonOptions.JSON_MAP_NULL_KEY_MODE;
+import static org.apache.flink.formats.json.mongo.MongoJsonOptions.NAMESPACE_INCLUDE;
+import static org.apache.flink.formats.json.mongo.MongoJsonOptions.TIMESTAMP_FORMAT;
+import static org.apache.flink.formats.json.mongo.MongoJsonOptions.validateDecodingFormatOptions;
+import static org.apache.flink.formats.json.mongo.MongoJsonOptions.validateEncodingFormatOptions;
 
 /**
  * Format factory for providing configured instances of Mongo JSON to RowData {@link
@@ -89,12 +94,19 @@ public class MongoJsonFormatFactory
                         .build();
             }
 
+            final boolean encodeDecimalAsPlainNumber =
+                    formatOptions.get(ENCODE_DECIMAL_AS_PLAIN_NUMBER);
+
             @Override
             public SerializationSchema<RowData> createRuntimeEncoder(
                     DynamicTableSink.Context context, DataType consumedDataType) {
                 final RowType rowType = (RowType) consumedDataType.getLogicalType();
-                return new CanalJsonSerializationSchema(
-                        rowType, timestampFormat, mapNullKeyMode, mapNullKeyLiteral);
+                return new MongoJsonSerializationSchema(
+                        rowType,
+                        timestampFormat,
+                        mapNullKeyMode,
+                        mapNullKeyLiteral,
+                        encodeDecimalAsPlainNumber);
             }
         };
     }

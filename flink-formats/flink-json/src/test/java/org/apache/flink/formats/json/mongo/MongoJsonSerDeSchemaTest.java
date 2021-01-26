@@ -46,7 +46,10 @@ import java.util.List;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.api.DataTypes.*;
+import static org.apache.flink.table.api.DataTypes.FIELD;
+import static org.apache.flink.table.api.DataTypes.INT;
+import static org.apache.flink.table.api.DataTypes.ROW;
+import static org.apache.flink.table.api.DataTypes.STRING;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThat;
@@ -54,22 +57,19 @@ import static org.junit.Assert.assertThat;
 /** Tests for {@link MongoJsonSerializationSchema} and {@link MongoJsonDeserializationSchema}. */
 public class MongoJsonSerDeSchemaTest {
 
-    @Rule
-    public ExpectedException thrown = ExpectedException.none();
+    @Rule public ExpectedException thrown = ExpectedException.none();
 
     private static final DataType PHYSICAL_DATA_TYPE =
-            ROW(
-                    FIELD("Name", INT().notNull()),
-                    FIELD("Value", STRING()));
+            ROW(FIELD("Name", INT().notNull()), FIELD("Value", STRING()));
 
     @Test
     public void testFilteringTables() throws Exception {
         List<String> lines = readLines("mongo-data-filter-table.txt");
         MongoJsonDeserializationSchema deserializationSchema =
                 MongoJsonDeserializationSchema.builder(
-                        PHYSICAL_DATA_TYPE,
-                        Collections.emptyList(),
-                        InternalTypeInfo.of(PHYSICAL_DATA_TYPE.getLogicalType()))
+                                PHYSICAL_DATA_TYPE,
+                                Collections.emptyList(),
+                                InternalTypeInfo.of(PHYSICAL_DATA_TYPE.getLogicalType()))
                         .setNamespace("mydb.product")
                         .build();
         runTest(lines, deserializationSchema);
@@ -124,9 +124,9 @@ public class MongoJsonSerDeSchemaTest {
         List<String> lines = readLines("canal-data.txt");
         MongoJsonDeserializationSchema deserializationSchema =
                 MongoJsonDeserializationSchema.builder(
-                        PHYSICAL_DATA_TYPE,
-                        Collections.emptyList(),
-                        InternalTypeInfo.of(PHYSICAL_DATA_TYPE.getLogicalType()))
+                                PHYSICAL_DATA_TYPE,
+                                Collections.emptyList(),
+                                InternalTypeInfo.of(PHYSICAL_DATA_TYPE.getLogicalType()))
                         .setIgnoreParseErrors(false)
                         .setTimestampFormat(TimestampFormat.ISO_8601)
                         .build();
@@ -209,7 +209,8 @@ public class MongoJsonSerDeSchemaTest {
                         (RowType) PHYSICAL_DATA_TYPE.getLogicalType(),
                         TimestampFormat.ISO_8601,
                         JsonOptions.MapNullKeyMode.LITERAL,
-                        "null");
+                        "null",
+                        false);
         serializationSchema.open(null);
 
         List<String> result = new ArrayList<>();
@@ -250,8 +251,7 @@ public class MongoJsonSerDeSchemaTest {
     }
 
     private void testDeserializationWithMetadata(
-            String resourceFile, String database, Consumer<RowData> testConsumer)
-            throws Exception {
+            String resourceFile, String database, Consumer<RowData> testConsumer) throws Exception {
         // we only read the first line for keeping the test simple
         final String firstLine = readLines(resourceFile).get(0);
         final List<ReadableMetadata> requestedMetadata = Arrays.asList(ReadableMetadata.values());
@@ -273,9 +273,9 @@ public class MongoJsonSerDeSchemaTest {
                                 .map(m -> DataTypes.FIELD(m.key, m.dataType))
                                 .collect(Collectors.toList()));
         return MongoJsonDeserializationSchema.builder(
-                PHYSICAL_DATA_TYPE,
-                requestedMetadata,
-                InternalTypeInfo.of(producedDataType.getLogicalType()))
+                        PHYSICAL_DATA_TYPE,
+                        requestedMetadata,
+                        InternalTypeInfo.of(producedDataType.getLogicalType()))
                 .setNamespace(namespace)
                 .setIgnoreParseErrors(false)
                 .setTimestampFormat(TimestampFormat.ISO_8601)
