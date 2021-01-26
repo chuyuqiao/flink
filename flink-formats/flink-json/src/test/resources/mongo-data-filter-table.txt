@@ -1,0 +1,2 @@
+{"ts":6854066273047807000,"op":"i","g":"","ns":"mydb.product","o":[{"Name":"_id","Value":"1"},{"Name":"product_id","Value":123456789}],"o2":null,"uk":null,"lsid":{"id":{"Kind":4,"Data":"RK4sSE76SsSV5Wzz2JijIA=="},"uid":"L82CiPEN1+b9kkTclmNaEZUU3TonAO7n3ia6Hib4fM0="},"fromMigrate":false}
+{"ts":6854066273047807000,"op":"i","g":"","ns":"mydb.order","o":[{"Name":"_id","Value":"1"},{"Name":"product_id","Value":123456789}],"o2":null,"uk":null,"lsid":{"id":{"Kind":4,"Data":"RK4sSE76SsSV5Wzz2JijIA=="},"uid":"L82CiPEN1+b9kkTclmNaEZUU3TonAO7n3ia6Hib4fM0="},"fromMigrate":false}
