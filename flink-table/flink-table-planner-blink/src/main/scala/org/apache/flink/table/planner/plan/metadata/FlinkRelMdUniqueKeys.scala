@@ -23,7 +23,7 @@ import org.apache.flink.table.planner._
 import org.apache.flink.table.planner.calcite.FlinkRelBuilder.PlannerNamedWindowProperty
 import org.apache.flink.table.planner.calcite.FlinkTypeFactory
 import org.apache.flink.table.planner.plan.nodes.calcite.{Expand, Rank, WatermarkAssigner, WindowAggregate}
-import org.apache.flink.table.planner.plan.nodes.common.CommonLookupJoin
+import org.apache.flink.table.planner.plan.nodes.common.CommonPhysicalLookupJoin
 import org.apache.flink.table.planner.plan.nodes.logical._
 import org.apache.flink.table.planner.plan.nodes.physical.batch._
 import org.apache.flink.table.planner.plan.nodes.physical.stream._
@@ -306,7 +306,7 @@ class FlinkRelMdUniqueKeys private extends MetadataHandler[BuiltInMetadata.Uniqu
       ignoreNulls: Boolean): JSet[ImmutableBitSet] = mq.getUniqueKeys(rel.getInput, ignoreNulls)
 
   def getUniqueKeys(
-      rel: StreamExecDeduplicate,
+      rel: StreamPhysicalDeduplicate,
       mq: RelMetadataQuery,
       ignoreNulls: Boolean): JSet[ImmutableBitSet] = {
     ImmutableSet.of(ImmutableBitSet.of(rel.getUniqueKeys.map(Integer.valueOf).toList))
@@ -434,14 +434,14 @@ class FlinkRelMdUniqueKeys private extends MetadataHandler[BuiltInMetadata.Uniqu
   }
 
   def getUniqueKeys(
-      rel: BatchExecOverAggregate,
+      rel: BatchPhysicalOverAggregate,
       mq: RelMetadataQuery,
       ignoreNulls: Boolean): JSet[ImmutableBitSet] = {
     getUniqueKeysOfOverAgg(rel, mq, ignoreNulls)
   }
 
   def getUniqueKeys(
-      rel: StreamExecOverAggregate,
+      rel: StreamPhysicalOverAggregate,
       mq: RelMetadataQuery,
       ignoreNulls: Boolean): JSet[ImmutableBitSet] = {
     getUniqueKeysOfOverAgg(rel, mq, ignoreNulls)
@@ -470,15 +470,15 @@ class FlinkRelMdUniqueKeys private extends MetadataHandler[BuiltInMetadata.Uniqu
   }
 
   def getUniqueKeys(
-      rel: StreamExecIntervalJoin,
+      rel: StreamPhysicalIntervalJoin,
       mq: RelMetadataQuery,
       ignoreNulls: Boolean): JSet[ImmutableBitSet] = {
-    val joinInfo = JoinInfo.of(rel.getLeft, rel.getRight, rel.joinCondition)
-    getJoinUniqueKeys(joinInfo, rel.joinType, rel.getLeft, rel.getRight, mq, ignoreNulls)
+    val joinInfo = JoinInfo.of(rel.getLeft, rel.getRight, rel.originalCondition)
+    getJoinUniqueKeys(joinInfo, rel.getJoinType, rel.getLeft, rel.getRight, mq, ignoreNulls)
   }
 
   def getUniqueKeys(
-      join: CommonLookupJoin,
+      join: CommonPhysicalLookupJoin,
       mq: RelMetadataQuery,
       ignoreNulls: Boolean): util.Set[ImmutableBitSet] = {
     val left = join.getInput

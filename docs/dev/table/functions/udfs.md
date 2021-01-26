@@ -227,7 +227,7 @@ public static class SumFunction extends ScalarFunction {
   }
 
   public Integer eval(String a, String b) {
-    return Integer.valueOf(a) + Integer.valueOf();
+    return Integer.valueOf(a) + Integer.valueOf(b);
   }
 
   public Integer eval(Double... d) {
@@ -550,6 +550,9 @@ public static class LiteralFunction extends ScalarFunction {
 </div>
 
 </div>
+
+For more examples of custom type inference, see also the `flink-examples-table` module with
+{% gh_link flink-examples/flink-examples-table/src/main/java/org/apache/flink/table/examples/java/functions/AdvancedFunctionsExample.java "advanced function implementation" %}.
 
 ### Determinism
 
@@ -1020,7 +1023,7 @@ env
 
 // call registered function in SQL
 env.sqlQuery(
-  "SELECT myField, WeightedAvg(value, weight) FROM MyTable GROUP BY myField"
+  "SELECT myField, WeightedAvg(`value`, weight) FROM MyTable GROUP BY myField"
 );
 {% endhighlight %}
 </div>
@@ -1096,7 +1099,7 @@ env
 
 // call registered function in SQL
 env.sqlQuery(
-  "SELECT myField, WeightedAvg(value, weight) FROM MyTable GROUP BY myField"
+  "SELECT myField, WeightedAvg(`value`, weight) FROM MyTable GROUP BY myField"
 )
 {% endhighlight %}
 </div>

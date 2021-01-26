@@ -401,7 +401,7 @@ object FlinkStreamRuleSets {
     StreamPhysicalDataStreamScanRule.INSTANCE,
     StreamPhysicalTableSourceScanRule.INSTANCE,
     StreamPhysicalLegacyTableSourceScanRule.INSTANCE,
-    StreamExecIntermediateTableScanRule.INSTANCE,
+    StreamPhysicalIntermediateTableScanRule.INSTANCE,
     StreamPhysicalWatermarkAssignerRule.INSTANCE,
     StreamPhysicalValuesRule.INSTANCE,
     // calc
@@ -416,7 +416,7 @@ object FlinkStreamRuleSets {
     StreamPhysicalTemporalSortRule.INSTANCE,
     // rank
     StreamPhysicalRankRule.INSTANCE,
-    StreamExecDeduplicateRule.RANK_INSTANCE,
+    StreamPhysicalDeduplicateRule.RANK_INSTANCE,
     // expand
     StreamPhysicalExpandRule.INSTANCE,
     // group agg
@@ -425,27 +425,27 @@ object FlinkStreamRuleSets {
     StreamPhysicalPythonGroupAggregateRule.INSTANCE,
     StreamPhysicalPythonGroupTableAggregateRule.INSTANCE,
     // over agg
-    StreamExecOverAggregateRule.INSTANCE,
-    StreamExecPythonOverAggregateRule.INSTANCE,
+    StreamPhysicalOverAggregateRule.INSTANCE,
+    StreamPhysicalPythonOverAggregateRule.INSTANCE,
     // window agg
     StreamPhysicalGroupWindowAggregateRule.INSTANCE,
     StreamPhysicalGroupWindowTableAggregateRule.INSTANCE,
     StreamPhysicalPythonGroupWindowAggregateRule.INSTANCE,
     // join
-    StreamExecJoinRule.INSTANCE,
-    StreamExecIntervalJoinRule.INSTANCE,
-    StreamExecTemporalJoinRule.INSTANCE,
-    StreamExecLookupJoinRule.SNAPSHOT_ON_TABLESCAN,
-    StreamExecLookupJoinRule.SNAPSHOT_ON_CALC_TABLESCAN,
+    StreamPhysicalJoinRule.INSTANCE,
+    StreamPhysicalIntervalJoinRule.INSTANCE,
+    StreamPhysicalTemporalJoinRule.INSTANCE,
+    StreamPhysicalLookupJoinRule.SNAPSHOT_ON_TABLESCAN,
+    StreamPhysicalLookupJoinRule.SNAPSHOT_ON_CALC_TABLESCAN,
     // CEP
-    StreamExecMatchRule.INSTANCE,
+    StreamPhysicalMatchRule.INSTANCE,
     // correlate
     StreamPhysicalConstantTableFunctionScanRule.INSTANCE,
     StreamPhysicalCorrelateRule.INSTANCE,
     StreamPhysicalPythonCorrelateRule.INSTANCE,
     // sink
-    StreamExecSinkRule.INSTANCE,
-    StreamExecLegacySinkRule.INSTANCE
+    StreamPhysicalSinkRule.INSTANCE,
+    StreamPhysicalLegacySinkRule.INSTANCE
   )
 
   /**

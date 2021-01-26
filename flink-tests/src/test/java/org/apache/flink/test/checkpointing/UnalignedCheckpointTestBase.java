@@ -73,7 +73,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -94,6 +93,9 @@ public abstract class UnalignedCheckpointTestBase extends TestLogger {
     protected static final String NUM_DUPLICATES = "duplicates";
     protected static final String NUM_LOST = "lost";
     public static final int BUFFER_PER_CHANNEL = 1;
+
+    private static final long HEADER = 0xABCDEAFCL << 32;
+    private static final long HEADER_MASK = 0xFFFFFFFFL << 32;
 
     @Rule public final TemporaryFolder temp = new TemporaryFolder();
 
@@ -194,7 +196,6 @@ public abstract class UnalignedCheckpointTestBase extends TestLogger {
         }
 
         private static class LongSourceReader implements SourceReader<Long, LongSplit> {
-
             private final long minCheckpoints;
             private final int expectedRestarts;
             private final LongCounter numInputsCounter = new LongCounter();
@@ -217,7 +218,7 @@ public abstract class UnalignedCheckpointTestBase extends TestLogger {
                     return InputStatus.NOTHING_AVAILABLE;
                 }
 
-                output.collect(split.nextNumber, split.nextNumber);
+                output.collect(withHeader(split.nextNumber), split.nextNumber);
                 split.nextNumber += split.increment;
 
                 if (throttle) {
@@ -325,6 +326,10 @@ public abstract class UnalignedCheckpointTestBase extends TestLogger {
                 this.numCompletedCheckpoints = numCompletedCheckpoints;
             }
 
+            public int getBaseNumber() {
+                return (int) (nextNumber % increment);
+            }
+
             @Override
             public String splitId() {
                 return String.valueOf(increment);
@@ -379,13 +384,9 @@ public abstract class UnalignedCheckpointTestBase extends TestLogger {
             public void addReader(int subtaskId) {
                 if (context.registeredReaders().size() == context.currentParallelism()
                         && !state.unassignedSplits.isEmpty()) {
-                    int numReaders = context.registeredReaders().size();
-                    Map<Integer, List<LongSplit>> assignment = new HashMap<>();
-                    for (int i = 0; i < state.unassignedSplits.size(); i++) {
-                        assignment
-                                .computeIfAbsent(i % numReaders, t -> new ArrayList<>())
-                                .add(state.unassignedSplits.get(i));
-                    }
+                    Map<Integer, List<LongSplit>> assignment =
+                            state.unassignedSplits.stream()
+                                    .collect(Collectors.groupingBy(LongSplit::getBaseNumber));
                     LOG.info("Assigning splits {}", assignment);
                     context.assignSplits(new SplitsAssignment<>(assignment));
                     state.unassignedSplits.clear();
@@ -665,7 +666,7 @@ public abstract class UnalignedCheckpointTestBase extends TestLogger {
 
         @Override
         public Long map(Long value) throws Exception {
-            lastValue = value;
+            lastValue = withoutHeader(value);
             checkFail(failDuringMap, "map");
             return value;
         }
@@ -839,6 +840,21 @@ public abstract class UnalignedCheckpointTestBase extends TestLogger {
                     getRuntimeContext().getIndexOfThisSubtask(),
                     getRuntimeContext().getAttemptNumber());
             super.close();
+        }
+    }
+
+    protected static long withHeader(long value) {
+        return value ^ HEADER;
+    }
+
+    protected static long withoutHeader(long value) {
+        checkHeader(value);
+        return value ^ HEADER;
+    }
+
+    protected static void checkHeader(long value) {
+        if ((value & HEADER_MASK) != HEADER) {
+            throw new IllegalArgumentException("Stream corrupted");
         }
     }
 }

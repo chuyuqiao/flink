@@ -71,9 +71,6 @@ import org.apache.flink.runtime.registration.RegistrationResponse;
 import org.apache.flink.runtime.registration.RetryingRegistration;
 import org.apache.flink.runtime.resourcemanager.ResourceManagerGateway;
 import org.apache.flink.runtime.resourcemanager.ResourceManagerId;
-import org.apache.flink.runtime.rest.handler.legacy.backpressure.BackPressureStatsTracker;
-import org.apache.flink.runtime.rest.handler.legacy.backpressure.OperatorBackPressureStats;
-import org.apache.flink.runtime.rest.handler.legacy.backpressure.OperatorBackPressureStatsResponse;
 import org.apache.flink.runtime.rpc.FatalErrorHandler;
 import org.apache.flink.runtime.rpc.PermanentlyFencedRpcEndpoint;
 import org.apache.flink.runtime.rpc.RpcService;
@@ -164,10 +161,6 @@ public class JobMaster extends PermanentlyFencedRpcEndpoint<JobMasterId>
     private final long initializationTimestamp;
 
     private final boolean retrieveTaskManagerHostName;
-
-    // --------- BackPressure --------
-
-    private final BackPressureStatsTracker backPressureStatsTracker;
 
     // --------- ResourceManager --------
 
@@ -321,9 +314,6 @@ public class JobMaster extends PermanentlyFencedRpcEndpoint<JobMasterId>
                                     return Optional.of(taskManagerInfo.f1);
                                 });
 
-        this.backPressureStatsTracker =
-                checkNotNull(jobManagerSharedServices.getBackPressureStatsTracker());
-
         this.shuffleMaster = checkNotNull(shuffleMaster);
 
         this.jobManagerJobMetricGroup = jobMetricGroupFactory.create(jobGraph);
@@ -351,7 +341,6 @@ public class JobMaster extends PermanentlyFencedRpcEndpoint<JobMasterId>
                 schedulerNGFactory.createInstance(
                         log,
                         jobGraph,
-                        backPressureStatsTracker,
                         scheduledExecutorService,
                         jobMasterConfiguration.getConfiguration(),
                         slotPool,
@@ -365,10 +354,9 @@ public class JobMaster extends PermanentlyFencedRpcEndpoint<JobMasterId>
                         shuffleMaster,
                         partitionTracker,
                         executionDeploymentTracker,
-                        initializationTimestamp);
-
-        scheduler.initialize(getMainThreadExecutor());
-        scheduler.registerJobStatusListener(jobStatusListener);
+                        initializationTimestamp,
+                        getMainThreadExecutor(),
+                        jobStatusListener);
 
         return scheduler;
     }
@@ -522,6 +510,17 @@ public class JobMaster extends PermanentlyFencedRpcEndpoint<JobMasterId>
 
         schedulerNG.acknowledgeCheckpoint(
                 jobID, executionAttemptID, checkpointId, checkpointMetrics, checkpointState);
+    }
+
+    @Override
+    public void reportCheckpointMetrics(
+            JobID jobID,
+            ExecutionAttemptID executionAttemptID,
+            long checkpointId,
+            CheckpointMetrics checkpointMetrics) {
+
+        schedulerNG.reportCheckpointMetrics(
+                jobID, executionAttemptID, checkpointId, checkpointMetrics);
     }
 
     // TODO: This method needs a leader session ID
@@ -785,20 +784,6 @@ public class JobMaster extends PermanentlyFencedRpcEndpoint<JobMasterId>
             final Time timeout) {
 
         return schedulerNG.stopWithSavepoint(targetDirectory, advanceToEndOfEventTime);
-    }
-
-    @Override
-    public CompletableFuture<OperatorBackPressureStatsResponse> requestOperatorBackPressureStats(
-            final JobVertexID jobVertexId) {
-        try {
-            final Optional<OperatorBackPressureStats> operatorBackPressureStats =
-                    schedulerNG.requestOperatorBackPressureStats(jobVertexId);
-            return CompletableFuture.completedFuture(
-                    OperatorBackPressureStatsResponse.of(operatorBackPressureStats.orElse(null)));
-        } catch (FlinkException e) {
-            log.info("Error while requesting operator back pressure stats", e);
-            return FutureUtils.completedExceptionally(e);
-        }
     }
 
     @Override

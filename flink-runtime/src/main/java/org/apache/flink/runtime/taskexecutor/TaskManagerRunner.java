@@ -25,7 +25,6 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.JMXServerOptions;
 import org.apache.flink.configuration.TaskManagerOptions;
 import org.apache.flink.configuration.TaskManagerOptionsInternal;
-import org.apache.flink.configuration.WebOptions;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.plugin.PluginManager;
 import org.apache.flink.core.plugin.PluginUtils;
@@ -34,7 +33,6 @@ import org.apache.flink.runtime.akka.AkkaUtils;
 import org.apache.flink.runtime.blob.BlobCacheService;
 import org.apache.flink.runtime.clusterframework.types.ResourceID;
 import org.apache.flink.runtime.concurrent.FutureUtils;
-import org.apache.flink.runtime.concurrent.ScheduledExecutor;
 import org.apache.flink.runtime.entrypoint.FlinkParseException;
 import org.apache.flink.runtime.externalresource.ExternalResourceInfoProvider;
 import org.apache.flink.runtime.externalresource.ExternalResourceUtils;
@@ -53,6 +51,7 @@ import org.apache.flink.runtime.metrics.util.MetricUtils;
 import org.apache.flink.runtime.rpc.FatalErrorHandler;
 import org.apache.flink.runtime.rpc.RpcService;
 import org.apache.flink.runtime.rpc.akka.AkkaRpcServiceUtils;
+import org.apache.flink.runtime.security.FlinkSecurityManager;
 import org.apache.flink.runtime.security.SecurityConfiguration;
 import org.apache.flink.runtime.security.SecurityUtils;
 import org.apache.flink.runtime.taskmanager.MemoryLogger;
@@ -84,7 +83,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-import static org.apache.flink.runtime.security.ExitTrappingSecurityManager.replaceGracefulExitWithHaltIfConfigured;
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /**
@@ -375,7 +373,7 @@ public class TaskManagerRunner implements FatalErrorHandler, AutoCloseableAsync 
     }
 
     public static void runTaskManagerSecurely(Configuration configuration) throws Exception {
-        replaceGracefulExitWithHaltIfConfigured(configuration);
+        FlinkSecurityManager.setFromConfiguration(configuration);
         final PluginManager pluginManager =
                 PluginUtils.createPluginManagerFromRootFolder(configuration);
         FileSystem.initialize(configuration, pluginManager);
@@ -498,16 +496,7 @@ public class TaskManagerRunner implements FatalErrorHandler, AutoCloseableAsync 
                 metricQueryServiceAddress,
                 blobCacheService,
                 fatalErrorHandler,
-                new TaskExecutorPartitionTrackerImpl(taskManagerServices.getShuffleEnvironment()),
-                createBackPressureSampleService(configuration, rpcService.getScheduledExecutor()));
-    }
-
-    static BackPressureSampleService createBackPressureSampleService(
-            Configuration configuration, ScheduledExecutor scheduledExecutor) {
-        return new BackPressureSampleService(
-                configuration.getInteger(WebOptions.BACKPRESSURE_NUM_SAMPLES),
-                Time.milliseconds(configuration.getInteger(WebOptions.BACKPRESSURE_DELAY)),
-                scheduledExecutor);
+                new TaskExecutorPartitionTrackerImpl(taskManagerServices.getShuffleEnvironment()));
     }
 
     /**
