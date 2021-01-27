@@ -16,15 +16,18 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.planner.plan.nodes.exec
+package org.apache.flink.runtime.state;
 
-import org.apache.flink.table.planner.delegation.BatchPlanner
-import org.apache.flink.table.planner.utils.Logging
+import org.apache.flink.annotation.Internal;
 
 /**
- * Base class for batch ExecNode.
+ * A set of resources produced in the synchronous part of a snapshot required to finish the
+ * snapshot.
  *
- * <p>NOTE: This class will be removed once all sub-classes do not extend from RelNode.
+ * @see SnapshotStrategy
  */
-@Deprecated
-trait LegacyBatchExecNode[T] extends LegacyExecNodeBase[BatchPlanner, T] with Logging
+@Internal
+public interface SnapshotResources {
+    /** Cleans up the resources after the asynchronous part is done. */
+    void release();
+}
