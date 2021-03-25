@@ -111,6 +111,16 @@ public final class BuiltInFunctionDefinitions {
                     .runtimeClass("org.apache.flink.table.runtime.functions.scalar.IfNullFunction")
                     .build();
 
+    public static final BuiltInFunctionDefinition SOURCE_WATERMARK =
+            BuiltInFunctionDefinition.newBuilder()
+                    .name("SOURCE_WATERMARK")
+                    .kind(SCALAR)
+                    .inputTypeStrategy(NO_ARGS)
+                    .outputTypeStrategy(explicit(DataTypes.TIMESTAMP(3)))
+                    .runtimeClass(
+                            "org.apache.flink.table.runtime.functions.scalar.SourceWatermarkFunction")
+                    .build();
+
     // --------------------------------------------------------------------------------------------
     // Logic functions
     // --------------------------------------------------------------------------------------------
@@ -1145,6 +1155,12 @@ public final class BuiltInFunctionDefinitions {
                     .kind(SCALAR)
                     .outputTypeStrategy(TypeStrategies.MISSING)
                     .build();
+    public static final BuiltInFunctionDefinition TO_TIMESTAMP_LTZ =
+            BuiltInFunctionDefinition.newBuilder()
+                    .name("toTimestampLtz")
+                    .kind(SCALAR)
+                    .outputTypeStrategy(TypeStrategies.MISSING)
+                    .build();
 
     // --------------------------------------------------------------------------------------------
     // Collection functions
@@ -1454,13 +1470,6 @@ public final class BuiltInFunctionDefinitions {
     public static final BuiltInFunctionDefinition RANGE_TO =
             BuiltInFunctionDefinition.newBuilder()
                     .name("rangeTo")
-                    .kind(OTHER)
-                    .outputTypeStrategy(TypeStrategies.MISSING)
-                    .build();
-
-    public static final BuiltInFunctionDefinition CALL_SQL =
-            BuiltInFunctionDefinition.newBuilder()
-                    .name("CALLSQL")
                     .kind(OTHER)
                     .outputTypeStrategy(TypeStrategies.MISSING)
                     .build();

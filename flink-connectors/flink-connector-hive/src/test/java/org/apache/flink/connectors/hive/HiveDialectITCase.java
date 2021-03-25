@@ -24,12 +24,20 @@ import org.apache.flink.table.api.SqlDialect;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.TableSchema;
+import org.apache.flink.table.api.internal.TableEnvironmentInternal;
 import org.apache.flink.table.catalog.CatalogPartitionSpec;
+import org.apache.flink.table.catalog.CatalogPropertiesUtil;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.ObjectPath;
-import org.apache.flink.table.catalog.config.CatalogConfig;
 import org.apache.flink.table.catalog.hive.HiveCatalog;
 import org.apache.flink.table.catalog.hive.HiveTestUtils;
+import org.apache.flink.table.delegation.Parser;
+import org.apache.flink.table.operations.command.ClearOperation;
+import org.apache.flink.table.operations.command.HelpOperation;
+import org.apache.flink.table.operations.command.QuitOperation;
+import org.apache.flink.table.operations.command.ResetOperation;
+import org.apache.flink.table.operations.command.SetOperation;
+import org.apache.flink.table.planner.delegation.hive.HiveParser;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CollectionUtil;
 import org.apache.flink.util.FileUtils;
@@ -63,8 +71,13 @@ import java.util.List;
 
 import static org.apache.flink.table.api.EnvironmentSettings.DEFAULT_BUILTIN_CATALOG;
 import static org.apache.flink.table.api.EnvironmentSettings.DEFAULT_BUILTIN_DATABASE;
+import static org.hamcrest.CoreMatchers.instanceOf;
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 
 /** Test Hive syntax when Hive dialect is used. */
@@ -100,11 +113,40 @@ public class HiveDialectITCase {
     }
 
     @Test
+    public void testPluggableParser() {
+        TableEnvironmentInternal tableEnvInternal = (TableEnvironmentInternal) tableEnv;
+        Parser parser = tableEnvInternal.getParser();
+        // hive dialect should use HiveParser
+        assertTrue(parser instanceof HiveParser);
+        // execute some sql and verify the parser instance is reused
+        tableEnvInternal.executeSql("show databases");
+        assertSame(parser, tableEnvInternal.getParser());
+        // switching dialect will result in a new parser
+        tableEnvInternal.getConfig().setSqlDialect(SqlDialect.DEFAULT);
+        assertNotEquals(
+                parser.getClass().getName(), tableEnvInternal.getParser().getClass().getName());
+    }
+
+    @Test
+    public void testParseCommand() {
+        TableEnvironmentInternal tableEnvInternal = (TableEnvironmentInternal) tableEnv;
+        Parser parser = tableEnvInternal.getParser();
+
+        // hive dialect should use HiveParser
+        assertTrue(parser instanceof HiveParser);
+        assertThat(parser.parse("HELP").get(0), instanceOf(HelpOperation.class));
+        assertThat(parser.parse("clear").get(0), instanceOf(ClearOperation.class));
+        assertThat(parser.parse("SET").get(0), instanceOf(SetOperation.class));
+        assertThat(parser.parse("ResET").get(0), instanceOf(ResetOperation.class));
+        assertThat(parser.parse("Exit").get(0), instanceOf(QuitOperation.class));
+    }
+
+    @Test
     public void testCreateDatabase() throws Exception {
         tableEnv.executeSql("create database db1 comment 'db1 comment'");
         Database db = hiveCatalog.getHiveDatabase("db1");
         assertEquals("db1 comment", db.getDescription());
-        assertFalse(Boolean.parseBoolean(db.getParameters().get(CatalogConfig.IS_GENERIC)));
+        assertFalse(Boolean.parseBoolean(db.getParameters().get(CatalogPropertiesUtil.IS_GENERIC)));
 
         String db2Location = warehouse + "/db2_location";
         tableEnv.executeSql(
@@ -280,7 +322,7 @@ public class HiveDialectITCase {
         ObjectPath tablePath = new ObjectPath("default", "tbl1");
 
         // change properties
-        tableEnv.executeSql("alter table tbl1 set tblproperties ('k2'='v2')");
+        tableEnv.executeSql("alter table `default`.tbl1 set tblproperties ('k2'='v2')");
         Table hiveTable = hiveCatalog.getHiveTable(tablePath);
         assertEquals("v1", hiveTable.getParameters().get("k1"));
         assertEquals("v2", hiveTable.getParameters().get("k2"));
@@ -288,7 +330,7 @@ public class HiveDialectITCase {
         // change location
         String newLocation = warehouse + "/tbl1_new_location";
         tableEnv.executeSql(
-                String.format("alter table `default`.tbl1 set location '%s'", newLocation));
+                String.format("alter table default.tbl1 set location '%s'", newLocation));
         hiveTable = hiveCatalog.getHiveTable(tablePath);
         assertEquals(newLocation, locationPath(hiveTable.getSd().getLocation()));
 
@@ -517,6 +559,34 @@ public class HiveDialectITCase {
         tableEnv.executeSql("drop function my_abs");
         assertFalse(hiveCatalog.functionExists(new ObjectPath("default", "my_abs")));
         tableEnv.executeSql("drop function if exists foo");
+    }
+
+    @Test
+    public void testTemporaryFunction() throws Exception {
+        // create temp function
+        tableEnv.executeSql(
+                String.format(
+                        "create temporary function temp_abs as '%s'",
+                        GenericUDFAbs.class.getName()));
+        String[] functions = tableEnv.listUserDefinedFunctions();
+        assertArrayEquals(new String[] {"temp_abs"}, functions);
+        // call the function
+        tableEnv.executeSql("create table src(x int)");
+        tableEnv.executeSql("insert into src values (1),(-1)").await();
+        assertEquals(
+                "[+I[1], +I[1]]",
+                queryResult(tableEnv.sqlQuery("select temp_abs(x) from src")).toString());
+        // switch DB and the temp function can still be used
+        tableEnv.executeSql("create database db1");
+        tableEnv.useDatabase("db1");
+        assertEquals(
+                "[+I[1], +I[1]]",
+                queryResult(tableEnv.sqlQuery("select temp_abs(x) from `default`.src")).toString());
+        // drop the function
+        tableEnv.executeSql("drop temporary function temp_abs");
+        functions = tableEnv.listUserDefinedFunctions();
+        assertEquals(0, functions.length);
+        tableEnv.executeSql("drop temporary function if exists foo");
     }
 
     @Test

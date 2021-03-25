@@ -38,6 +38,7 @@ import org.apache.flink.runtime.executiongraph.ExecutionAttemptID;
 import org.apache.flink.runtime.executiongraph.ExecutionJobVertex;
 import org.apache.flink.runtime.executiongraph.failover.flip1.RestartAllFailoverStrategy;
 import org.apache.flink.runtime.jobgraph.JobGraph;
+import org.apache.flink.runtime.jobgraph.JobGraphBuilder;
 import org.apache.flink.runtime.jobgraph.JobVertex;
 import org.apache.flink.runtime.jobgraph.JobVertexID;
 import org.apache.flink.runtime.jobgraph.OperatorID;
@@ -117,7 +118,7 @@ public class OperatorCoordinatorSchedulerTest extends TestLogger {
     @After
     public void shutdownScheduler() throws Exception {
         if (createdScheduler != null) {
-            createdScheduler.suspend(new Exception("shutdown"));
+            createdScheduler.close();
         }
     }
 
@@ -138,7 +139,7 @@ public class OperatorCoordinatorSchedulerTest extends TestLogger {
         final DefaultScheduler scheduler = createAndStartScheduler();
         final TestingOperatorCoordinator coordinator = getCoordinator(scheduler);
 
-        scheduler.suspend(new Exception("test suspend"));
+        scheduler.close();
 
         assertTrue(coordinator.isClosed());
     }
@@ -663,7 +664,9 @@ public class OperatorCoordinatorSchedulerTest extends TestLogger {
         vertex.addOperatorCoordinator(new SerializedValue<>(provider));
         vertex.setParallelism(2);
 
-        final JobGraph jobGraph = new JobGraph("test job with OperatorCoordinator", vertex);
+        final JobGraph jobGraph =
+                JobGraphBuilder.newStreamingJobGraphBuilder().addJobVertex(vertex).build();
+
         SchedulerTestingUtils.enableCheckpointing(jobGraph);
         if (jobGraphPreProcessing != null) {
             jobGraphPreProcessing.accept(jobGraph);

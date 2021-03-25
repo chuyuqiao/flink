@@ -100,9 +100,7 @@ public class ValidatingCheckpointHandler extends AbstractInvokable {
 
     @Override
     public Future<Boolean> triggerCheckpointAsync(
-            CheckpointMetaData checkpointMetaData,
-            CheckpointOptions checkpointOptions,
-            boolean advanceToEndOfEventTime) {
+            CheckpointMetaData checkpointMetaData, CheckpointOptions checkpointOptions) {
         throw new UnsupportedOperationException("should never be called");
     }
 
@@ -127,9 +125,9 @@ public class ValidatingCheckpointHandler extends AbstractInvokable {
     }
 
     @Override
-    public void abortCheckpointOnBarrier(long checkpointId, Throwable cause) {
+    public void abortCheckpointOnBarrier(long checkpointId, CheckpointException cause) {
         lastCanceledCheckpointId = checkpointId;
-        failureReason = ((CheckpointException) cause).getCheckpointFailureReason();
+        failureReason = cause.getCheckpointFailureReason();
         abortedCheckpointCounter++;
     }
 

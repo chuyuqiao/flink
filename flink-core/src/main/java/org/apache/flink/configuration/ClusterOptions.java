@@ -123,9 +123,57 @@ public class ClusterOptions {
                     .withDescription(
                             "Defines whether the cluster uses declarative resource management.");
 
+    @Documentation.ExcludeFromDocumentation
+    public static final ConfigOption<Boolean> ENABLE_FINE_GRAINED_RESOURCE_MANAGEMENT =
+            ConfigOptions.key("cluster.fine-grained-resource-management.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Defines whether the cluster uses fine-grained resource management.");
+
     public static boolean isDeclarativeResourceManagementEnabled(Configuration configuration) {
-        return configuration.get(ENABLE_DECLARATIVE_RESOURCE_MANAGEMENT)
-                && !System.getProperties().containsKey("flink.tests.disable-declarative");
+        if (configuration.contains(ENABLE_DECLARATIVE_RESOURCE_MANAGEMENT)) {
+            return configuration.get(ENABLE_DECLARATIVE_RESOURCE_MANAGEMENT);
+        } else {
+            return !System.getProperties().containsKey("flink.tests.disable-declarative");
+        }
+    }
+
+    public static JobManagerOptions.SchedulerType getSchedulerType(Configuration configuration) {
+        if (isAdaptiveSchedulerEnabled(configuration) || isReactiveModeEnabled(configuration)) {
+            return JobManagerOptions.SchedulerType.Adaptive;
+        } else {
+            return configuration.get(JobManagerOptions.SCHEDULER);
+        }
+    }
+
+    private static boolean isReactiveModeEnabled(Configuration configuration) {
+        return configuration.get(JobManagerOptions.SCHEDULER_MODE)
+                == SchedulerExecutionMode.REACTIVE;
+    }
+
+    public static boolean isAdaptiveSchedulerEnabled(Configuration configuration) {
+        if (configuration.contains(JobManagerOptions.SCHEDULER)) {
+            return configuration.get(JobManagerOptions.SCHEDULER)
+                    == JobManagerOptions.SchedulerType.Adaptive;
+        } else {
+            return System.getProperties().containsKey("flink.tests.enable-adaptive-scheduler");
+        }
+    }
+
+    public static boolean isFineGrainedResourceManagementEnabled(Configuration configuration) {
+        // TODO We need to bind fine-grained with declarative because in the first step we implement
+        // the feature base on the declarative protocol. We would be able to support both protocols
+        // and no longer need this binding after FLINK-20838.
+        if (!isDeclarativeResourceManagementEnabled(configuration)) {
+            return false;
+        }
+
+        if (configuration.contains(ENABLE_FINE_GRAINED_RESOURCE_MANAGEMENT)) {
+            return configuration.get(ENABLE_FINE_GRAINED_RESOURCE_MANAGEMENT);
+        } else {
+            return System.getProperties().containsKey("flink.tests.enable-fine-grained");
+        }
     }
 
     /** The mode of how to handle user code attempting to exit JVM. */

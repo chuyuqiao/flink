@@ -63,9 +63,15 @@ public class SqlCommandParserTest {
                         TestItem.validSql("eXiT;", SqlCommand.QUIT).cannotParseComment(),
                         TestItem.validSql("CLEAR;", SqlCommand.CLEAR).cannotParseComment(),
                         // desc xx
-                        TestItem.validSql("DESC MyTable", SqlCommand.DESC, "MyTable")
+                        TestItem.validSql(
+                                        "DESC MyTable",
+                                        SqlCommand.DESCRIBE,
+                                        "`default_catalog`.`default_database`.`MyTable`")
                                 .cannotParseComment(),
-                        TestItem.validSql("DESC         MyTable     ", SqlCommand.DESC, "MyTable")
+                        TestItem.validSql(
+                                        "DESC         MyTable     ",
+                                        SqlCommand.DESCRIBE,
+                                        "`default_catalog`.`default_database`.`MyTable`")
                                 .cannotParseComment(),
                         TestItem.invalidSql(
                                 "DESC ", // no table name
@@ -167,6 +173,12 @@ public class SqlCommandParserTest {
                                 .cannotParseComment(),
                         // reset
                         TestItem.validSql("reset;", SqlCommand.RESET).cannotParseComment(),
+                        // reset xx.yy
+                        TestItem.validSql("reset xx.yy;", SqlCommand.RESET, "xx.yy")
+                                .cannotParseComment(),
+                        // reset xx-yy
+                        TestItem.validSql("reset xx-yy;", SqlCommand.RESET, "xx-yy")
+                                .cannotParseComment(),
                         // source xx
                         TestItem.validSql("source /my/file;", SqlCommand.SOURCE, "/my/file")
                                 .cannotParseComment(),
@@ -282,19 +294,74 @@ public class SqlCommandParserTest {
                         // show current database
                         TestItem.validSql(
                                 "show current database", SqlCommand.SHOW_CURRENT_DATABASE),
+                        // show views
+                        TestItem.validSql("SHOW VIEWS;", SqlCommand.SHOW_VIEWS),
+                        TestItem.validSql("  SHOW   VIEWS   ;", SqlCommand.SHOW_VIEWS),
+                        // load module with module name as identifier
                         TestItem.validSql(
-                                "show 	current 	database", SqlCommand.SHOW_CURRENT_DATABASE),
-                        // show tables
-                        TestItem.validSql("SHOW TABLES;", SqlCommand.SHOW_TABLES),
-                        TestItem.validSql("  SHOW   TABLES   ;", SqlCommand.SHOW_TABLES),
-                        // show functions
-                        TestItem.validSql("SHOW FUNCTIONS;", SqlCommand.SHOW_FUNCTIONS),
-                        TestItem.validSql("  SHOW    FUNCTIONS   ", SqlCommand.SHOW_FUNCTIONS),
+                                "LOAD MODULE dummy", SqlCommand.LOAD_MODULE, "LOAD MODULE dummy"),
+                        // load module with module name as reversed keyword
+                        TestItem.validSql(
+                                "LOAD MODULE `MODULE`",
+                                SqlCommand.LOAD_MODULE,
+                                "LOAD MODULE `MODULE`"),
+                        // load module with module name as literal
+                        TestItem.invalidSql(
+                                "LOAD MODULE 'dummy'",
+                                SqlExecutionException.class,
+                                "Encountered \"\\'dummy\\'\""),
+                        TestItem.validSql(
+                                "LOAD MODULE dummy WITH ('dummy-version' = '1')",
+                                SqlCommand.LOAD_MODULE,
+                                "LOAD MODULE dummy WITH ('dummy-version' = '1')"),
+                        // unload module
+                        TestItem.validSql(
+                                "UNLOAD MODULE dummy",
+                                SqlCommand.UNLOAD_MODULE,
+                                "UNLOAD MODULE dummy"),
+                        // use one module
+                        TestItem.validSql(
+                                "USE MODULES dummy", SqlCommand.USE_MODULES, "USE MODULES dummy"),
+                        // use multiple modules
+                        TestItem.validSql(
+                                "USE MODULES x, y, z",
+                                SqlCommand.USE_MODULES,
+                                "USE MODULES x, y, z"),
+                        // use modules with module names as reserved keywords
+                        TestItem.validSql(
+                                "USE MODULES `MODULE`, `MODULES`",
+                                SqlCommand.USE_MODULES,
+                                "USE MODULES `MODULE`, `MODULES`"),
+                        // use modules with module names as literals
+                        TestItem.invalidSql(
+                                "USE MODULES 'dummy'",
+                                SqlExecutionException.class,
+                                "Encountered \"\\'dummy\\'\""),
+                        TestItem.invalidSql(
+                                "USE MODULES",
+                                SqlExecutionException.class,
+                                "Encountered \"<EOF>\""),
                         // show modules
-                        TestItem.validSql("SHOW MODULES", SqlCommand.SHOW_MODULES)
-                                .cannotParseComment(),
-                        TestItem.validSql("  SHOW    MODULES   ", SqlCommand.SHOW_MODULES)
-                                .cannotParseComment(),
+                        TestItem.validSql("SHOW MODULES", SqlCommand.SHOW_MODULES, "SHOW MODULES"),
+                        // show full modules
+                        TestItem.validSql(
+                                "SHOW FULL MODULES", SqlCommand.SHOW_MODULES, "SHOW FULL MODULES"),
+                        // show functions
+                        TestItem.validSql(
+                                "SHOW FUNCTIONS;", SqlCommand.SHOW_FUNCTIONS, "SHOW FUNCTIONS"),
+                        TestItem.validSql(
+                                "  SHOW FUNCTIONS   ;",
+                                SqlCommand.SHOW_FUNCTIONS,
+                                "SHOW FUNCTIONS"),
+                        // show user functions
+                        TestItem.validSql(
+                                "SHOW USER FUNCTIONS;",
+                                SqlCommand.SHOW_FUNCTIONS,
+                                "SHOW USER FUNCTIONS"),
+                        TestItem.validSql(
+                                "  SHOW USER FUNCTIONS   ;",
+                                SqlCommand.SHOW_FUNCTIONS,
+                                "SHOW USER FUNCTIONS"),
                         // Test create function.
                         TestItem.invalidSql(
                                 "CREATE FUNCTION ",

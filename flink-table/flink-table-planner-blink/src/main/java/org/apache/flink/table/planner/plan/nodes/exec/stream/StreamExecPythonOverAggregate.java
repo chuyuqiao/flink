@@ -32,8 +32,10 @@ import org.apache.flink.table.planner.delegation.PlannerBase;
 import org.apache.flink.table.planner.plan.nodes.exec.ExecEdge;
 import org.apache.flink.table.planner.plan.nodes.exec.ExecNode;
 import org.apache.flink.table.planner.plan.nodes.exec.ExecNodeBase;
+import org.apache.flink.table.planner.plan.nodes.exec.InputProperty;
+import org.apache.flink.table.planner.plan.nodes.exec.SingleTransformationTranslator;
+import org.apache.flink.table.planner.plan.nodes.exec.spec.OverSpec;
 import org.apache.flink.table.planner.plan.nodes.exec.utils.CommonPythonUtil;
-import org.apache.flink.table.planner.plan.nodes.exec.utils.OverSpec;
 import org.apache.flink.table.planner.plan.utils.KeySelectorUtil;
 import org.apache.flink.table.planner.plan.utils.OverAggregateUtil;
 import org.apache.flink.table.runtime.keyselector.RowDataKeySelector;
@@ -54,7 +56,7 @@ import java.util.Collections;
 
 /** Stream {@link ExecNode} for python time-based over operator. */
 public class StreamExecPythonOverAggregate extends ExecNodeBase<RowData>
-        implements StreamExecNode<RowData> {
+        implements StreamExecNode<RowData>, SingleTransformationTranslator<RowData> {
     private static final Logger LOG = LoggerFactory.getLogger(StreamExecPythonOverAggregate.class);
 
     private static final String
@@ -77,8 +79,11 @@ public class StreamExecPythonOverAggregate extends ExecNodeBase<RowData>
     private final OverSpec overSpec;
 
     public StreamExecPythonOverAggregate(
-            OverSpec overSpec, ExecEdge inputEdge, RowType outputType, String description) {
-        super(Collections.singletonList(inputEdge), outputType, description);
+            OverSpec overSpec,
+            InputProperty inputProperty,
+            RowType outputType,
+            String description) {
+        super(Collections.singletonList(inputProperty), outputType, description);
         this.overSpec = overSpec;
     }
 
@@ -109,9 +114,10 @@ public class StreamExecPythonOverAggregate extends ExecNodeBase<RowData>
                             + "excessive state size. You may specify a retention time of 0 to not clean up the state.");
         }
 
-        final ExecNode<RowData> inputNode = (ExecNode<RowData>) getInputNodes().get(0);
-        final Transformation<RowData> inputTransform = inputNode.translateToPlan(planner);
-        final RowType inputRowType = (RowType) inputNode.getOutputType();
+        final ExecEdge inputEdge = getInputEdges().get(0);
+        final Transformation<RowData> inputTransform =
+                (Transformation<RowData>) inputEdge.translateToPlan(planner);
+        final RowType inputRowType = (RowType) inputEdge.getOutputType();
 
         final int orderKey = orderKeys[0];
         final LogicalType orderKeyType = inputRowType.getFields().get(orderKey).getType();
@@ -154,10 +160,6 @@ public class StreamExecPythonOverAggregate extends ExecNodeBase<RowData>
                         tableConfig.getMinIdleStateRetentionTime(),
                         tableConfig.getMaxIdleStateRetentionTime(),
                         config);
-        if (inputsContainSingleton()) {
-            transform.setParallelism(1);
-            transform.setMaxParallelism(1);
-        }
 
         if (CommonPythonUtil.isPythonWorkerUsingManagedMemory(config)) {
             transform.declareManagedMemoryUseCaseAtSlotScope(ManagedMemoryUseCase.PYTHON);

@@ -26,10 +26,9 @@ import org.apache.flink.table.expressions._
 import org.apache.flink.table.functions.{FunctionIdentifier, UserDefinedFunctionHelper}
 import org.apache.flink.table.module.ModuleManager
 import org.apache.flink.table.operations.TableSourceQueryOperation
-import org.apache.flink.table.planner.calcite.FlinkRelBuilder.PlannerNamedWindowProperty
 import org.apache.flink.table.planner.calcite.{FlinkContext, FlinkRelBuilder, FlinkTypeFactory}
 import org.apache.flink.table.planner.delegation.PlannerContext
-import org.apache.flink.table.planner.expressions.{PlannerProctimeAttribute, PlannerRowtimeAttribute, PlannerWindowReference, PlannerWindowStart}
+import org.apache.flink.table.planner.expressions.{PlannerNamedWindowProperty, PlannerProctimeAttribute, PlannerRowtimeAttribute, PlannerWindowReference, PlannerWindowStart}
 import org.apache.flink.table.planner.functions.sql.FlinkSqlOperatorTable
 import org.apache.flink.table.planner.functions.utils.AggSqlFunction
 import org.apache.flink.table.planner.plan.PartialFinalType
@@ -242,7 +241,7 @@ class FlinkRelMdHandlerTestBase {
     (filter, calc)
   }
 
-  protected lazy val logicalWatermarkAssigner = {
+  protected lazy val logicalWatermarkAssigner: RelNode = {
     val scan = relBuilder.scan("TemporalTable2").build()
     val flinkContext = cluster
       .getPlanner
@@ -262,12 +261,9 @@ class FlinkRelMdHandlerTestBase {
   // id, null, score, age, height, null, class, 5
   protected lazy val (logicalExpand, flinkLogicalExpand, batchExpand, streamExpand) = {
     val cluster = studentLogicalScan.getCluster
-    val expandOutputType = ExpandUtil.buildExpandRowType(
-      cluster.getTypeFactory, studentLogicalScan.getRowType, Array.empty[Integer])
     val expandProjects = ExpandUtil.createExpandProjects(
       studentLogicalScan.getCluster.getRexBuilder,
       studentLogicalScan.getRowType,
-      expandOutputType,
       ImmutableBitSet.of(1, 3, 5),
       ImmutableList.of(
         ImmutableBitSet.of(1, 3, 5),
@@ -275,16 +271,16 @@ class FlinkRelMdHandlerTestBase {
         ImmutableBitSet.of(3)),
       Array.empty[Integer])
     val logicalExpand = new LogicalExpand(cluster, studentLogicalScan.getTraitSet,
-      studentLogicalScan, expandOutputType, expandProjects, 7)
+      studentLogicalScan, expandProjects, 7)
 
     val flinkLogicalExpand = new FlinkLogicalExpand(cluster, flinkLogicalTraits,
-      studentFlinkLogicalScan, expandOutputType, expandProjects, 7)
+      studentFlinkLogicalScan, expandProjects, 7)
 
     val batchExpand = new BatchPhysicalExpand(cluster, batchPhysicalTraits,
-      studentBatchScan, expandOutputType, expandProjects, 7)
+      studentBatchScan, expandProjects, 7)
 
     val streamExecExpand = new StreamPhysicalExpand(cluster, streamPhysicalTraits,
-      studentStreamScan, expandOutputType, expandProjects, 7)
+      studentStreamScan, expandProjects, 7)
 
     (logicalExpand, flinkLogicalExpand, batchExpand, streamExecExpand)
   }
@@ -1157,7 +1153,7 @@ class FlinkRelMdHandlerTestBase {
   // only for row_time we distinguish by batch row time, for what we hard code DataTypes.TIMESTAMP,
   // which is ok here for testing.
   private lazy val windowRef: PlannerWindowReference =
-  PlannerWindowReference.apply("w$", Some(new TimestampType(3)))
+    new PlannerWindowReference("w$", new TimestampType(3))
 
   protected lazy val tumblingGroupWindow: LogicalWindow =
     TumblingGroupWindow(
@@ -1171,10 +1167,10 @@ class FlinkRelMdHandlerTestBase {
     )
 
   protected lazy val namedPropertiesOfWindowAgg: Seq[PlannerNamedWindowProperty] =
-    Seq(PlannerNamedWindowProperty("w$start", PlannerWindowStart(windowRef)),
-      PlannerNamedWindowProperty("w$end", PlannerWindowStart(windowRef)),
-      PlannerNamedWindowProperty("w$rowtime", PlannerRowtimeAttribute(windowRef)),
-      PlannerNamedWindowProperty("w$proctime", PlannerProctimeAttribute(windowRef)))
+    Seq(new PlannerNamedWindowProperty("w$start", new PlannerWindowStart(windowRef)),
+      new PlannerNamedWindowProperty("w$end", new PlannerWindowStart(windowRef)),
+      new PlannerNamedWindowProperty("w$rowtime", new PlannerRowtimeAttribute(windowRef)),
+      new PlannerNamedWindowProperty("w$proctime", new PlannerProctimeAttribute(windowRef)))
 
   // equivalent SQL is
   // select a, b, count(c) as s,

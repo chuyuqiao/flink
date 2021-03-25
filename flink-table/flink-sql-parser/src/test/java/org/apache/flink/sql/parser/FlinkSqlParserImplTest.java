@@ -56,6 +56,8 @@ public class FlinkSqlParserImplTest extends SqlParserTest {
     @Test
     public void testDescribeCatalog() {
         sql("describe catalog a").ok("DESCRIBE CATALOG `A`");
+
+        sql("desc catalog a").ok("DESCRIBE CATALOG `A`");
     }
 
     /**
@@ -151,6 +153,10 @@ public class FlinkSqlParserImplTest extends SqlParserTest {
         sql("describe database db1").ok("DESCRIBE DATABASE `DB1`");
         sql("describe database catlog1.db1").ok("DESCRIBE DATABASE `CATLOG1`.`DB1`");
         sql("describe database extended db1").ok("DESCRIBE DATABASE EXTENDED `DB1`");
+
+        sql("desc database db1").ok("DESCRIBE DATABASE `DB1`");
+        sql("desc database catlog1.db1").ok("DESCRIBE DATABASE `CATLOG1`.`DB1`");
+        sql("desc database extended db1").ok("DESCRIBE DATABASE EXTENDED `DB1`");
     }
 
     @Test
@@ -175,10 +181,9 @@ public class FlinkSqlParserImplTest extends SqlParserTest {
     }
 
     @Test
-    public void testShowFuntions() {
+    public void testShowFunctions() {
         sql("show functions").ok("SHOW FUNCTIONS");
-        sql("show functions db1").ok("SHOW FUNCTIONS `DB1`");
-        sql("show functions catalog1.db1").ok("SHOW FUNCTIONS `CATALOG1`.`DB1`");
+        sql("show user functions").ok("SHOW USER FUNCTIONS");
     }
 
     @Test
@@ -191,6 +196,10 @@ public class FlinkSqlParserImplTest extends SqlParserTest {
         sql("describe tbl").ok("DESCRIBE `TBL`");
         sql("describe catlog1.db1.tbl").ok("DESCRIBE `CATLOG1`.`DB1`.`TBL`");
         sql("describe extended db1").ok("DESCRIBE EXTENDED `DB1`");
+
+        sql("desc tbl").ok("DESCRIBE `TBL`");
+        sql("desc catlog1.db1.tbl").ok("DESCRIBE `CATLOG1`.`DB1`.`TBL`");
+        sql("desc extended db1").ok("DESCRIBE EXTENDED `DB1`");
     }
 
     /**
@@ -1151,6 +1160,49 @@ public class FlinkSqlParserImplTest extends SqlParserTest {
 
         sql("drop temporary system function if exists catalog1.db1.function1")
                 .ok("DROP TEMPORARY SYSTEM FUNCTION IF EXISTS `CATALOG1`.`DB1`.`FUNCTION1`");
+    }
+
+    @Test
+    public void testLoadModule() {
+        sql("load module core").ok("LOAD MODULE `CORE`");
+
+        sql("load module dummy with ('k1' = 'v1', 'k2' = 'v2')")
+                .ok(
+                        "LOAD MODULE `DUMMY`"
+                                + " WITH (\n"
+                                + "  'k1' = 'v1',\n"
+                                + "  'k2' = 'v2'\n"
+                                + ")");
+
+        sql("load module ^'core'^")
+                .fails("(?s).*Encountered \"\\\\'core\\\\'\" at line 1, column 13.\n.*");
+    }
+
+    @Test
+    public void testUnloadModule() {
+        sql("unload module core").ok("UNLOAD MODULE `CORE`");
+
+        sql("unload module ^'core'^")
+                .fails("(?s).*Encountered \"\\\\'core\\\\'\" at line 1, column 15.\n.*");
+    }
+
+    @Test
+    public void testUseModules() {
+        sql("use modules core").ok("USE MODULES `CORE`");
+
+        sql("use modules x, y, z").ok("USE MODULES `X`, `Y`, `Z`");
+
+        sql("use modules x^,^").fails("(?s).*Encountered \"<EOF>\" at line 1, column 14.\n.*");
+
+        sql("use modules ^'core'^")
+                .fails("(?s).*Encountered \"\\\\'core\\\\'\" at line 1, column 13.\n.*");
+    }
+
+    @Test
+    public void testShowModules() {
+        sql("show modules").ok("SHOW MODULES");
+
+        sql("show full modules").ok("SHOW FULL MODULES");
     }
 
     public static BaseMatcher<SqlNode> validated(String validatedSql) {

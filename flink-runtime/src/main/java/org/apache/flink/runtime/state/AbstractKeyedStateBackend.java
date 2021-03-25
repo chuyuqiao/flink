@@ -26,6 +26,7 @@ import org.apache.flink.api.common.state.StateDescriptor;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.core.fs.CloseableRegistry;
 import org.apache.flink.runtime.checkpoint.CheckpointOptions;
+import org.apache.flink.runtime.checkpoint.CheckpointType;
 import org.apache.flink.runtime.query.TaskKvStateRegistry;
 import org.apache.flink.runtime.state.heap.InternalKeyContext;
 import org.apache.flink.runtime.state.internal.InternalKvState;
@@ -48,7 +49,9 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
  * @param <K> Type of the key by which state is keyed.
  */
 public abstract class AbstractKeyedStateBackend<K>
-        implements CheckpointableKeyedStateBackend<K>, CheckpointListener {
+        implements CheckpointableKeyedStateBackend<K>,
+                CheckpointListener,
+                TestableKeyedStateBackend {
 
     /** The key serializer. */
     protected final TypeSerializer<K> keySerializer;
@@ -127,7 +130,10 @@ public abstract class AbstractKeyedStateBackend<K>
                 numberOfKeyGroups >= 1, "NumberOfKeyGroups must be a positive number");
         Preconditions.checkArgument(
                 numberOfKeyGroups >= keyGroupRange.getNumberOfKeyGroups(),
-                "The total number of key groups must be at least the number in the key group range assigned to this backend");
+                "The total number of key groups must be at least the number in the key group range assigned to this backend. "
+                        + "The total number of key groups: %s, the number in key groups in range: %s",
+                numberOfKeyGroups,
+                keyGroupRange.getNumberOfKeyGroups());
 
         this.kvStateRegistry = kvStateRegistry;
         this.keySerializer = keySerializer;
@@ -230,9 +236,26 @@ public abstract class AbstractKeyedStateBackend<K>
             final KeyedStateFunction<K, S> function)
             throws Exception {
 
+        applyToAllKeys(
+                namespace,
+                namespaceSerializer,
+                stateDescriptor,
+                function,
+                this::getPartitionedState);
+    }
+
+    public <N, S extends State, T> void applyToAllKeys(
+            final N namespace,
+            final TypeSerializer<N> namespaceSerializer,
+            final StateDescriptor<S, T> stateDescriptor,
+            final KeyedStateFunction<K, S> function,
+            final PartitionStateFactory partitionStateFactory)
+            throws Exception {
+
         try (Stream<K> keyStream = getKeys(stateDescriptor.getName(), namespace)) {
 
-            final S state = getPartitionedState(namespace, namespaceSerializer, stateDescriptor);
+            final S state =
+                    partitionStateFactory.get(namespace, namespaceSerializer, stateDescriptor);
 
             keyStream.forEach(
                     (K key) -> {
@@ -274,14 +297,14 @@ public abstract class AbstractKeyedStateBackend<K>
         return (S) kvState;
     }
 
-    private void publishQueryableStateIfEnabled(
+    public void publishQueryableStateIfEnabled(
             StateDescriptor<?, ?> stateDescriptor, InternalKvState<?, ?, ?> kvState) {
         if (stateDescriptor.isQueryable()) {
             if (kvStateRegistry == null) {
                 throw new IllegalStateException("State backend has not been initialized for job.");
             }
             String name = stateDescriptor.getQueryableStateName();
-            kvStateRegistry.registerKvState(keyGroupRange, name, kvState);
+            kvStateRegistry.registerKvState(keyGroupRange, name, kvState, userCodeClassLoader);
         }
     }
 
@@ -335,17 +358,21 @@ public abstract class AbstractKeyedStateBackend<K>
         return keyGroupCompressionDecorator;
     }
 
-    /** Returns the total number of state entries across all keys/namespaces. */
-    @VisibleForTesting
-    public abstract int numKeyValueStateEntries();
-
     @VisibleForTesting
     public int numKeyValueStatesByName() {
         return keyValueStatesByName.size();
     }
 
     // TODO remove this once heap-based timers are working with RocksDB incremental snapshots!
-    public boolean requiresLegacySynchronousTimerSnapshots() {
+    public boolean requiresLegacySynchronousTimerSnapshots(CheckpointType checkpointType) {
         return false;
+    }
+
+    public interface PartitionStateFactory {
+        <N, S extends State> S get(
+                final N namespace,
+                final TypeSerializer<N> namespaceSerializer,
+                final StateDescriptor<S, ?> stateDescriptor)
+                throws Exception;
     }
 }

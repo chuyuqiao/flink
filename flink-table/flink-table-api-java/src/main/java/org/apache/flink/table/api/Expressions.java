@@ -23,6 +23,7 @@ import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.table.expressions.ApiExpressionUtils;
 import org.apache.flink.table.expressions.Expression;
 import org.apache.flink.table.expressions.ResolvedExpression;
+import org.apache.flink.table.expressions.SqlCallExpression;
 import org.apache.flink.table.expressions.TimePointUnit;
 import org.apache.flink.table.functions.BuiltInFunctionDefinitions;
 import org.apache.flink.table.functions.FunctionDefinition;
@@ -208,6 +209,24 @@ public final class Expressions {
     /** Returns the current SQL timestamp in local time zone. */
     public static ApiExpression localTimestamp() {
         return apiCall(BuiltInFunctionDefinitions.LOCAL_TIMESTAMP);
+    }
+
+    /**
+     * Converts a numeric type epoch time to {@link DataTypes#TIMESTAMP_LTZ(int)}.
+     *
+     * <p>The supported precision is 0 or 3:
+     *
+     * <ul>
+     *   <li>0 means the numericEpochTime is in second.
+     *   <li>3 means the numericEpochTime is in millisecond.
+     * </ul>
+     *
+     * @param numericEpochTime The epoch time with numeric type.
+     * @param precision The precision to indicate the epoch time is in second or millisecond.
+     * @return The timestamp value with {@link DataTypes#TIMESTAMP_LTZ(int)} type.
+     */
+    public static ApiExpression toTimestampLtz(Object numericEpochTime, Object precision) {
+        return apiCall(BuiltInFunctionDefinitions.TO_TIMESTAMP_LTZ, numericEpochTime, precision);
     }
 
     /**
@@ -540,7 +559,7 @@ public final class Expressions {
      * table-valued functions are not supported. Sub-queries are also not allowed.
      */
     public static ApiExpression callSql(String sqlExpression) {
-        return apiCall(BuiltInFunctionDefinitions.CALL_SQL, sqlExpression);
+        return apiSqlCall(sqlExpression);
     }
 
     private static ApiExpression apiCall(FunctionDefinition functionDefinition, Object... args) {
@@ -567,5 +586,9 @@ public final class Expressions {
                         .map(ApiExpressionUtils::objectToExpression)
                         .collect(Collectors.toList());
         return new ApiExpression(unresolvedCall(functionDefinition, arguments));
+    }
+
+    private static ApiExpression apiSqlCall(String sqlExpression) {
+        return new ApiExpression(new SqlCallExpression(sqlExpression));
     }
 }

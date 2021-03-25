@@ -20,14 +20,14 @@ package org.apache.flink.table.client.cli;
 
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.api.TableResult;
+import org.apache.flink.table.client.SqlClient;
 import org.apache.flink.table.client.SqlClientException;
 import org.apache.flink.table.client.cli.SqlCommandParser.SqlCommandCall;
+import org.apache.flink.table.client.config.YamlConfigUtils;
 import org.apache.flink.table.client.gateway.Executor;
-import org.apache.flink.table.client.gateway.ProgramTargetDescriptor;
 import org.apache.flink.table.client.gateway.ResultDescriptor;
 import org.apache.flink.table.client.gateway.SqlExecutionException;
 import org.apache.flink.table.utils.PrintUtils;
-import org.apache.flink.util.CollectionUtil;
 
 import org.jline.reader.EndOfFileException;
 import org.jline.reader.LineReader;
@@ -43,19 +43,23 @@ import org.jline.utils.InfoCmp;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.IOError;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
-import static org.apache.flink.util.Preconditions.checkNotNull;
+import static org.apache.flink.table.client.cli.CliStrings.MESSAGE_DEPRECATED_KEY;
+import static org.apache.flink.table.client.cli.CliStrings.MESSAGE_REMOVED_KEY;
+import static org.apache.flink.table.client.cli.CliStrings.MESSAGE_RESET_KEY;
+import static org.apache.flink.table.client.cli.CliStrings.MESSAGE_SET;
+import static org.apache.flink.util.Preconditions.checkState;
 
 /** SQL CLI client. */
 public class CliClient implements AutoCloseable {
@@ -72,6 +76,8 @@ public class CliClient implements AutoCloseable {
 
     private final String prompt;
 
+    private final @Nullable MaskingCallback inputTransformer;
+
     private boolean isRunning;
 
     private static final int PLAIN_TERMINAL_WIDTH = 80;
@@ -85,10 +91,16 @@ public class CliClient implements AutoCloseable {
      * using {@link #close()}.
      */
     @VisibleForTesting
-    public CliClient(Terminal terminal, String sessionId, Executor executor, Path historyFilePath) {
+    public CliClient(
+            Terminal terminal,
+            String sessionId,
+            Executor executor,
+            Path historyFilePath,
+            @Nullable MaskingCallback inputTransformer) {
         this.terminal = terminal;
         this.sessionId = sessionId;
         this.executor = executor;
+        this.inputTransformer = inputTransformer;
 
         // make space from previous output and test the writer
         terminal.writer().println();
@@ -137,7 +149,7 @@ public class CliClient implements AutoCloseable {
      * afterwards using {@link #close()}.
      */
     public CliClient(String sessionId, Executor executor, Path historyFilePath) {
-        this(createDefaultTerminal(), sessionId, executor, historyFilePath);
+        this(createDefaultTerminal(), sessionId, executor, historyFilePath, null);
     }
 
     public Terminal getTerminal() {
@@ -197,7 +209,7 @@ public class CliClient implements AutoCloseable {
 
             final String line;
             try {
-                line = lineReader.readLine(prompt, null, (MaskingCallback) null, null);
+                line = lineReader.readLine(prompt, null, inputTransformer, null);
             } catch (UserInterruptException e) {
                 // user cancelled line with Ctrl+C
                 continue;
@@ -274,7 +286,7 @@ public class CliClient implements AutoCloseable {
                 callClear();
                 break;
             case RESET:
-                callReset();
+                callReset(cmdCall);
                 break;
             case SET:
                 callSet(cmdCall);
@@ -283,28 +295,15 @@ public class CliClient implements AutoCloseable {
                 callHelp();
                 break;
             case SHOW_CATALOGS:
-                callShowCatalogs();
-                break;
-            case SHOW_CURRENT_CATALOG:
-                callShowCurrentCatalog();
-                break;
             case SHOW_DATABASES:
-                callShowDatabases();
-                break;
-            case SHOW_CURRENT_DATABASE:
-                callShowCurrentDatabase();
-                break;
             case SHOW_TABLES:
-                callShowTables();
-                break;
+            case SHOW_VIEWS:
             case SHOW_FUNCTIONS:
-                callShowFunctions();
-                break;
             case SHOW_MODULES:
-                callShowModules();
-                break;
             case SHOW_PARTITIONS:
-                callShowPartitions(cmdCall);
+            case SHOW_CURRENT_CATALOG:
+            case SHOW_CURRENT_DATABASE:
+                callShow(cmdCall);
                 break;
             case USE_CATALOG:
                 callUseCatalog(cmdCall);
@@ -312,7 +311,6 @@ public class CliClient implements AutoCloseable {
             case USE:
                 callUseDatabase(cmdCall);
                 break;
-            case DESC:
             case DESCRIBE:
                 callDescribe(cmdCall);
                 break;
@@ -383,6 +381,24 @@ public class CliClient implements AutoCloseable {
             case DROP_CATALOG:
                 callDdl(cmdCall.operands[0], CliStrings.MESSAGE_CATALOG_REMOVED);
                 break;
+            case LOAD_MODULE:
+                callDdl(
+                        cmdCall.operands[0],
+                        CliStrings.MESSAGE_LOAD_MODULE_SUCCEEDED,
+                        CliStrings.MESSAGE_LOAD_MODULE_FAILED);
+                break;
+            case UNLOAD_MODULE:
+                callDdl(
+                        cmdCall.operands[0],
+                        CliStrings.MESSAGE_UNLOAD_MODULE_SUCCEEDED,
+                        CliStrings.MESSAGE_UNLOAD_MODULE_FAILED);
+                break;
+            case USE_MODULES:
+                callDdl(
+                        cmdCall.operands[0],
+                        CliStrings.MESSAGE_USE_MODULES_SUCCEEDED,
+                        CliStrings.MESSAGE_USE_MODULES_FAILED);
+                break;
             default:
                 throw new SqlClientException("Unsupported command: " + cmdCall.command);
         }
@@ -397,14 +413,36 @@ public class CliClient implements AutoCloseable {
         clearTerminal();
     }
 
-    private void callReset() {
+    private void callReset(SqlCommandCall cmdCall) {
         try {
-            executor.resetSessionProperties(sessionId);
+            // reset all session properties
+            if (cmdCall.operands.length == 0) {
+                executor.resetSessionProperties(sessionId);
+                printInfo(CliStrings.MESSAGE_RESET);
+            }
+            // reset a session property
+            else {
+                String key = cmdCall.operands[0].trim();
+                executor.resetSessionProperty(sessionId, key);
+
+                boolean isRemovedKey = YamlConfigUtils.isRemovedKey(key);
+                boolean isDeprecatedKey = YamlConfigUtils.isDeprecatedKey(key);
+                if (isRemovedKey || isDeprecatedKey) {
+                    printRemovedOrDeprecatedKeyMessage(key);
+                }
+                // when it's not removedKey, need to print normal message
+                if (!isRemovedKey) {
+                    terminal.writer()
+                            .println(
+                                    CliStrings.messageInfo(String.format(MESSAGE_RESET_KEY, key))
+                                            .toAnsi());
+                    terminal.flush();
+                }
+            }
         } catch (SqlExecutionException e) {
             printExecutionException(e);
             return;
         }
-        printInfo(CliStrings.MESSAGE_RESET);
     }
 
     private void callSet(SqlCommandCall cmdCall) {
@@ -421,24 +459,32 @@ public class CliClient implements AutoCloseable {
                 terminal.writer()
                         .println(CliStrings.messageInfo(CliStrings.MESSAGE_EMPTY).toAnsi());
             } else {
-                properties.entrySet().stream()
-                        .map((e) -> e.getKey() + "=" + e.getValue())
-                        .sorted()
-                        .forEach((p) -> terminal.writer().println(p));
+                List<String> prettyEntries = YamlConfigUtils.getPropertiesInPretty(properties);
+                prettyEntries.forEach(entry -> terminal.writer().println(entry));
             }
+            terminal.flush();
         }
         // set a property
         else {
+            String key = cmdCall.operands[0].trim();
+            String value = cmdCall.operands[1].trim();
             try {
-                executor.setSessionProperty(
-                        sessionId, cmdCall.operands[0], cmdCall.operands[1].trim());
+                executor.setSessionProperty(sessionId, key, value);
             } catch (SqlExecutionException e) {
                 printExecutionException(e);
                 return;
             }
-            terminal.writer().println(CliStrings.messageInfo(CliStrings.MESSAGE_SET).toAnsi());
+            boolean isRemovedKey = YamlConfigUtils.isRemovedKey(key);
+            boolean isDeprecatedKey = YamlConfigUtils.isDeprecatedKey(key);
+            if (isRemovedKey || isDeprecatedKey) {
+                printRemovedOrDeprecatedKeyMessage(key);
+            }
+            // it's not removedKey, need to print info message
+            if (!isRemovedKey) {
+                terminal.writer().println(CliStrings.messageInfo(MESSAGE_SET).toAnsi());
+                terminal.flush();
+            }
         }
-        terminal.flush();
     }
 
     private void callHelp() {
@@ -446,181 +492,48 @@ public class CliClient implements AutoCloseable {
         terminal.flush();
     }
 
-    private void callShowCatalogs() {
-        final List<String> catalogs;
-        try {
-            catalogs = getShowResult("CATALOGS");
-        } catch (SqlExecutionException e) {
-            printExecutionException(e);
-            return;
-        }
-        if (catalogs.isEmpty()) {
-            terminal.writer().println(CliStrings.messageInfo(CliStrings.MESSAGE_EMPTY).toAnsi());
-        } else {
-            catalogs.forEach((v) -> terminal.writer().println(v));
-        }
-        terminal.flush();
-    }
-
-    private void callShowCurrentCatalog() {
-        String currentCatalog;
-        try {
-            currentCatalog =
-                    executor.executeSql(sessionId, "SHOW CURRENT CATALOG")
-                            .collect()
-                            .next()
-                            .toString();
-        } catch (SqlExecutionException e) {
-            printExecutionException(e);
-            return;
-        }
-        terminal.writer().println(currentCatalog);
-        terminal.flush();
-    }
-
-    private void callShowDatabases() {
-        final List<String> dbs;
-        try {
-            dbs = getShowResult("DATABASES");
-        } catch (SqlExecutionException e) {
-            printExecutionException(e);
-            return;
-        }
-        if (dbs.isEmpty()) {
-            terminal.writer().println(CliStrings.messageInfo(CliStrings.MESSAGE_EMPTY).toAnsi());
-        } else {
-            dbs.forEach((v) -> terminal.writer().println(v));
-        }
-        terminal.flush();
-    }
-
-    private void callShowCurrentDatabase() {
-        String currentDatabase;
-        try {
-            currentDatabase =
-                    executor.executeSql(sessionId, "SHOW CURRENT DATABASE")
-                            .collect()
-                            .next()
-                            .toString();
-        } catch (SqlExecutionException e) {
-            printExecutionException(e);
-            return;
-        }
-        terminal.writer().println(currentDatabase);
-        terminal.flush();
-    }
-
-    private void callShowTables() {
-        final List<String> tables;
-        try {
-            tables = getShowResult("TABLES");
-        } catch (SqlExecutionException e) {
-            printExecutionException(e);
-            return;
-        }
-        if (tables.isEmpty()) {
-            terminal.writer().println(CliStrings.messageInfo(CliStrings.MESSAGE_EMPTY).toAnsi());
-        } else {
-            tables.forEach((v) -> terminal.writer().println(v));
-        }
-        terminal.flush();
-    }
-
-    private void callShowFunctions() {
-        final List<String> functions;
-        try {
-            functions = getShowResult("FUNCTIONS");
-        } catch (SqlExecutionException e) {
-            printExecutionException(e);
-            return;
-        }
-        if (functions.isEmpty()) {
-            terminal.writer().println(CliStrings.messageInfo(CliStrings.MESSAGE_EMPTY).toAnsi());
-        } else {
-            Collections.sort(functions);
-            functions.forEach((v) -> terminal.writer().println(v));
-        }
-        terminal.flush();
-    }
-
-    private List<String> getShowResult(String objectToShow) {
-        TableResult tableResult = executor.executeSql(sessionId, "SHOW " + objectToShow);
-        return CollectionUtil.iteratorToList(tableResult.collect()).stream()
-                .map(r -> checkNotNull(r.getField(0)).toString())
-                .collect(Collectors.toList());
-    }
-
-    private List<String> getShowResult(SqlCommandCall cmdCall) {
-        TableResult tableResult = executor.executeSql(sessionId, cmdCall.operands[0]);
-        return CollectionUtil.iteratorToList(tableResult.collect()).stream()
-                .map(r -> checkNotNull(r.getField(0)).toString())
-                .collect(Collectors.toList());
-    }
-
-    private void callShowModules() {
-        final List<String> modules;
-        try {
-            modules = executor.listModules(sessionId);
-        } catch (SqlExecutionException e) {
-            printExecutionException(e);
-            return;
-        }
-        if (modules.isEmpty()) {
-            terminal.writer().println(CliStrings.messageInfo(CliStrings.MESSAGE_EMPTY).toAnsi());
-        } else {
-            // modules are already in the loaded order
-            modules.forEach((v) -> terminal.writer().println(v));
-        }
-        terminal.flush();
-    }
-
-    private void callShowPartitions(SqlCommandCall cmdCall) {
-        final List<String> partitions;
-        try {
-            partitions = getShowResult(cmdCall);
-        } catch (SqlExecutionException e) {
-            printExecutionException(e);
-            return;
-        }
-        if (partitions.isEmpty()) {
-            terminal.writer().println(CliStrings.messageInfo(CliStrings.MESSAGE_EMPTY).toAnsi());
-        } else {
-            partitions.forEach((v) -> terminal.writer().println(v));
-        }
-        terminal.flush();
+    private void callShow(SqlCommandCall cmdCall) {
+        getResultAsTableauForm(
+                cmdCall.operands.length == 0 ? cmdCall.command.toString() : cmdCall.operands[0]);
     }
 
     private void callUseCatalog(SqlCommandCall cmdCall) {
         try {
-            executor.executeSql(sessionId, "USE CATALOG " + cmdCall.operands[0]);
+            executor.executeSql(sessionId, "USE CATALOG `" + cmdCall.operands[0] + "`");
         } catch (SqlExecutionException e) {
             printExecutionException(e);
             return;
         }
+        printInfo(CliStrings.MESSAGE_CATALOG_CHANGED);
         terminal.flush();
     }
 
     private void callUseDatabase(SqlCommandCall cmdCall) {
         try {
-            executor.executeSql(sessionId, "USE " + cmdCall.operands[0]);
+            executor.executeSql(sessionId, "USE `" + cmdCall.operands[0] + "`");
         } catch (SqlExecutionException e) {
             printExecutionException(e);
             return;
         }
+        printInfo(CliStrings.MESSAGE_DATABASE_CHANGED);
         terminal.flush();
     }
 
     private void callDescribe(SqlCommandCall cmdCall) {
-        final TableResult tableResult;
+        getResultAsTableauForm("DESCRIBE " + cmdCall.operands[0]);
+    }
+
+    private void getResultAsTableauForm(String statement) {
+        final TableResult result;
         try {
-            tableResult = executor.executeSql(sessionId, "DESCRIBE " + cmdCall.operands[0]);
+            result = executor.executeSql(sessionId, statement);
         } catch (SqlExecutionException e) {
             printExecutionException(e);
             return;
         }
         PrintUtils.printAsTableauForm(
-                tableResult.getTableSchema(),
-                tableResult.collect(),
+                result.getResolvedSchema(),
+                result.collect(),
                 terminal.writer(),
                 Integer.MAX_VALUE,
                 "",
@@ -654,11 +567,7 @@ public class CliClient implements AutoCloseable {
         if (resultDesc.isTableauMode()) {
             try (CliTableauResultView tableauResultView =
                     new CliTableauResultView(terminal, executor, sessionId, resultDesc)) {
-                if (resultDesc.isMaterialized()) {
-                    tableauResultView.displayBatchResults();
-                } else {
-                    tableauResultView.displayStreamResults();
-                }
+                tableauResultView.displayResults();
             } catch (SqlExecutionException e) {
                 printExecutionException(e);
             }
@@ -686,13 +595,18 @@ public class CliClient implements AutoCloseable {
         printInfo(CliStrings.MESSAGE_SUBMITTING_STATEMENT);
 
         try {
-            final ProgramTargetDescriptor programTarget =
-                    executor.executeUpdate(sessionId, cmdCall.operands[0]);
+            final TableResult tableResult = executor.executeSql(sessionId, cmdCall.operands[0]);
+            checkState(tableResult.getJobClient().isPresent());
             terminal.writer()
                     .println(
                             CliStrings.messageInfo(CliStrings.MESSAGE_STATEMENT_SUBMITTED)
                                     .toAnsi());
-            terminal.writer().println(programTarget.toString());
+            // keep compatibility with before
+            terminal.writer()
+                    .println(
+                            String.format(
+                                    "Job ID: %s\n",
+                                    tableResult.getJobClient().get().getJobID().toString()));
             terminal.flush();
         } catch (SqlExecutionException e) {
             printExecutionException(e);
@@ -783,11 +697,41 @@ public class CliClient implements AutoCloseable {
         terminal.flush();
     }
 
+    private void printWarning(String message) {
+        terminal.writer().println(CliStrings.messageWarning(message).toAnsi());
+        terminal.flush();
+    }
+
+    private void printRemovedOrDeprecatedKeyMessage(String key) {
+        String msg =
+                YamlConfigUtils.isRemovedKey(key)
+                        ? MESSAGE_REMOVED_KEY
+                        : String.format(
+                                MESSAGE_DEPRECATED_KEY,
+                                key,
+                                YamlConfigUtils.getOptionNameWithDeprecatedKey(key));
+        printWarning(msg);
+    }
+
     // --------------------------------------------------------------------------------------------
+
+    /**
+     * Internal flag to use {@link System#in} and {@link System#out} stream to construct {@link
+     * Terminal} for tests. This allows tests can easily mock input stream when startup {@link
+     * SqlClient}.
+     */
+    protected static boolean useSystemInOutStream = false;
 
     private static Terminal createDefaultTerminal() {
         try {
-            return TerminalBuilder.builder().name(CliStrings.CLI_NAME).build();
+            if (useSystemInOutStream) {
+                return TerminalBuilder.builder()
+                        .name(CliStrings.CLI_NAME)
+                        .streams(System.in, System.out)
+                        .build();
+            } else {
+                return TerminalBuilder.builder().name(CliStrings.CLI_NAME).build();
+            }
         } catch (IOException e) {
             throw new SqlClientException("Error opening command line interface.", e);
         }

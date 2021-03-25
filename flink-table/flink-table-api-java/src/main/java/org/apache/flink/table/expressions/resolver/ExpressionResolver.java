@@ -46,6 +46,7 @@ import org.apache.flink.util.Preconditions;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -93,6 +94,7 @@ public class ExpressionResolver {
                 ResolverRules.OVER_WINDOWS,
                 ResolverRules.FIELD_RESOLVE,
                 ResolverRules.QUALIFY_BUILT_IN_FUNCTIONS,
+                ResolverRules.RESOLVE_SQL_CALL,
                 ResolverRules.RESOLVE_CALL_BY_ARGUMENTS);
     }
 
@@ -137,7 +139,13 @@ public class ExpressionResolver {
                 localReferences.stream()
                         .collect(
                                 Collectors.toMap(
-                                        LocalReferenceExpression::getName, Function.identity()));
+                                        LocalReferenceExpression::getName,
+                                        Function.identity(),
+                                        (u, v) -> {
+                                            throw new IllegalStateException(
+                                                    "Duplicate local reference: " + u);
+                                        },
+                                        LinkedHashMap::new));
         this.localOverWindows = prepareOverWindows(localOverWindows);
     }
 
@@ -307,6 +315,11 @@ public class ExpressionResolver {
         }
 
         @Override
+        public List<LocalReferenceExpression> getLocalReferences() {
+            return new ArrayList<>(localReferences.values());
+        }
+
+        @Override
         public Optional<LocalOverWindow> getOverWindow(Expression alias) {
             return Optional.ofNullable(localOverWindows.get(alias));
         }
@@ -444,7 +457,7 @@ public class ExpressionResolver {
 
         public ExpressionResolverBuilder withLocalReferences(
                 LocalReferenceExpression... localReferences) {
-            this.localReferences.addAll(Arrays.asList(localReferences));
+            this.localReferences = Arrays.asList(localReferences);
             return this;
         }
 

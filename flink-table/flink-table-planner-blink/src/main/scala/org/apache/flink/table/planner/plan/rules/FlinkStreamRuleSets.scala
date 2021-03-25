@@ -396,7 +396,9 @@ object FlinkStreamRuleSets {
     * RuleSet to do physical optimize for stream
     */
   val PHYSICAL_OPT_RULES: RuleSet = RuleSets.ofList(
+    FlinkCalcMergeRule.STREAM_PHYSICAL_INSTANCE,
     FlinkExpandConversionRule.STREAM_INSTANCE,
+    StreamPhysicalCalcRemoveRule.INSTANCE,
     // source
     StreamPhysicalDataStreamScanRule.INSTANCE,
     StreamPhysicalTableSourceScanRule.INSTANCE,
@@ -431,12 +433,19 @@ object FlinkStreamRuleSets {
     StreamPhysicalGroupWindowAggregateRule.INSTANCE,
     StreamPhysicalGroupWindowTableAggregateRule.INSTANCE,
     StreamPhysicalPythonGroupWindowAggregateRule.INSTANCE,
+    // window TVFs
+    StreamPhysicalWindowTableFunctionRule.INSTANCE,
+    StreamPhysicalWindowAggregateRule.INSTANCE,
+    PullUpWindowTableFunctionIntoWindowAggregateRule.INSTANCE,
+    ExpandWindowTableFunctionTransposeRule.INSTANCE,
+    StreamPhysicalWindowRankRule.INSTANCE,
     // join
     StreamPhysicalJoinRule.INSTANCE,
     StreamPhysicalIntervalJoinRule.INSTANCE,
     StreamPhysicalTemporalJoinRule.INSTANCE,
     StreamPhysicalLookupJoinRule.SNAPSHOT_ON_TABLESCAN,
     StreamPhysicalLookupJoinRule.SNAPSHOT_ON_CALC_TABLESCAN,
+    StreamPhysicalWindowJoinRule.INSTANCE,
     // CEP
     StreamPhysicalMatchRule.INSTANCE,
     // correlate
